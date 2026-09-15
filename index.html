@@ -1438,7 +1438,6 @@ const SYNONYMS = {
   "ジューサー":"ミキサー",
   "ブレンダー":"ミキサー",
   "キーボード":"キーボード",
-  "キャスター":"ネジ",
   "ノートPC":"ノート型パソコン",
   "電源コード":"延長コード",
   "ヘッドホン":"スピーカー",
@@ -1580,7 +1579,7 @@ const SYNONYMS = {
   "ざる":"食器",
   "金槌":"大工道具",
   "のみ":"大工道具",
-  "車輪":"ネジ",
+  
   "金具":"ネジ",
   "蝶番":"ネジ",
   "ネジ":"ネジ",
@@ -1727,7 +1726,7 @@ function synonymHits(word){
     for(const k in SYNONYMS){
       if(norm(k) === v){
         const r = synonymTarget(SYNONYMS[k]);
-        if(r.length) return r.map(x=>({r:x, why:`早見表の「${SYNONYMS[k]}」と同じ扱い`, from:SYNONYMS[k]}));
+        if(r.length) return r.map(x=>({r:x, why:`早見表の「${SYNONYMS[k]}」と同じ扱い`, from:SYNONYMS[k], key:k}));
       }
     }
   }
@@ -1739,7 +1738,7 @@ function synonymHits(word){
     if(nk.length < 2) continue;
     if(w0.endsWith(nk)){
       const r = synonymTarget(SYNONYMS[k]);
-      if(r.length) return r.map(x=>({r:x, why:`早見表の「${SYNONYMS[k]}」と同じ扱い`, from:SYNONYMS[k]}));
+      if(r.length) return r.map(x=>({r:x, why:`早見表の「${SYNONYMS[k]}」と同じ扱い`, from:SYNONYMS[k], key:k}));
     }
   }
   return [];
@@ -1936,7 +1935,7 @@ function render(word){
   if(syn.length){
     const escs = escalatorsFor(word, syn.map(x=>x.r.note).join(" "));
     if(syn.length === 1 && !syn[0].r.cat.includes("/")){
-      renderVerdict(syn[0].r, {word, why:syn[0].why, from:syn[0].from}); return;
+      renderVerdict(syn[0].r, {word, why:syn[0].why, from:syn[0].from, key:syn[0].key}); return;
     }
     renderGuessChoices(word, syn, true, "", "", escs); return;
   }
@@ -2111,6 +2110,7 @@ function labelCard(cat, name, signs){
   </div>`;
 }
 /* 貼り紙の品目名。入力した言葉は使わず、早見表の品目名か決まった呼び方にする。
+   言い換え辞書で当てたときは、辞書の呼び名（キーの側。例：ヘッドホン）を使う。行き先（例：スピーカー）は別の物のことがあるため。
    電池の場合は、取り外した電池そのものか、電池が内蔵された本体かで名前を変える */
 function caseLabelName(c, itemName){
   if(!c.battery) return itemName;
@@ -2224,7 +2224,7 @@ async function guess(word){
   if(syn.length){
     const escs = escalatorsFor(word, syn.map(x=>x.r.note).join(" "));
     if(syn.length === 1 && !syn[0].r.cat.includes("/") && !escs.length){
-      renderVerdict(syn[0].r, {word, why:syn[0].why, from:syn[0].from}); return;
+      renderVerdict(syn[0].r, {word, why:syn[0].why, from:syn[0].from, key:syn[0].key}); return;
     }
     renderGuessChoices(word, syn, true, "", "", escs); return;
   }
@@ -2316,7 +2316,7 @@ function renderGuessChoices(word, rows, splitCats, assumption, metal, escs){
     <div class="assume">金属は一部でも入っていれば金属製として扱います。ネジ・バネ・軸・金具・芯線も金属です。</div>
     ${metal ? `<div class="assume"><b>金属を含むものとして扱いました</b>（${esc(metal)}）。一部でも金属が入っていれば、見た目がプラスチックでも不燃ごみ側です。金属がまったく入っていない場合は、この候補は当てはまりません。</div>` : ""}
     ${assumption ? `<div class="assume">判断に使った前提：${esc(assumption)}　違っていればこの前提を読み替えてください</div>` : ""}
-    ${list.map(x=>candBlock(x.r, x.why)).join("")}
+    ${list.map(x=>candBlock(x.r, x.why, x.key)).join("")}
   </div>`;
 }
 
@@ -2375,6 +2375,7 @@ const PART_WORDS = {
   "ゴミ袋":["plastic"], "ごみ袋":["plastic"], "ポリ袋":["plastic"], "ヘアゴム":["plastic"],
   "軍手":["cloth"], "マフラー":["cloth"], "ハンカチ":["cloth"], "手ぬぐい":["cloth"],
   "付箋":["paper"], "メモ帳":["paper"],
+  "キャスター":["metal","plastic"], "車輪":["metal","plastic"],
   "雑貨":["shape"], "調理器具":["shape"], "危険物":["content","blade"], "割れ物":["glass","ceramic"]
 };
 function partsFor(word){
@@ -2500,7 +2501,7 @@ function renderVerdict(r, g){
   out.innerHTML = `
   <div class="card">
     ${badge}
-    ${howBlock(r, "verdict")}
+    ${howBlock(r, "verdict", g && g.key)}
 
     ${guessNote}
     ${escBlock(escalatorsFor(r.item, r.note), !/電池/.test(r.note||""))}

@@ -255,6 +255,14 @@ const mainCat = r => r.cat.split("/")[0].trim();
       if (names.some(n => n.includes(w))) failD.push(`貼り紙「${w}」の品目名に入力した言葉が入っている：${[...new Set(names)].join("／")}`);
     } catch (e) { failD.push(`貼り紙「${w}」描画で例外：${e.message}`); }
   }
+  // 言い換え辞書で当てたとき、貼り紙の品目名は辞書の呼び名（行き先の別の物の名前ではない）
+  for (const [w, want] of [["ヘッドホン", "ヘッドホン"], ["ボールペン", "ボールペン"], ["スマホの充電器", "充電器"], ["ティッシュ", "ティッシュ"]]) {
+    try {
+      outEl.innerHTML = ""; await context.render(w); const h = outEl.innerHTML;
+      const names = [...new Set([...h.matchAll(/class="lc ln"[^>]*>([^<]*)</g)].map(m => m[1]))];
+      if (!names.length || names.some(n => n !== want)) failD.push(`貼り紙「${w}」の品目名が「${want}」になっていない：${names.join("／")}`);
+    } catch (e) { failD.push(`貼り紙「${w}」描画で例外：${e.message}`); }
+  }
   for (const w of ["スマホの充電台", "補聴器", "ワイパー", "ピーラー", "家電"]) {
     try {
       outEl.innerHTML = "";
