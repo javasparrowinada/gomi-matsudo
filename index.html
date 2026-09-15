@@ -93,6 +93,24 @@ a{color:var(--ink)}
 .busy{font-size:15px;color:var(--sub);margin-top:20px}
 .thumb{max-width:180px;border:1px solid var(--line);margin-top:14px;display:block}
 .foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-size:13px;color:var(--sub)}
+
+/* 出す曜日（1週間の帯） */
+.dow{font-size:28px;font-weight:700;line-height:1.35;margin-top:14px}
+.week{display:flex;gap:4px;margin-top:10px}
+.week span{flex:1;text-align:center;font-size:18px;line-height:1;padding:10px 0;border:1px solid var(--line);color:var(--sub)}
+.week span.on{background:var(--ink);border-color:var(--ink);color:var(--paper);font-weight:700}
+.next{font-size:18px;margin-top:10px}
+/* 袋に貼る紙 */
+.paper{border:3px solid var(--ink);padding:14px 16px;margin-top:16px}
+.paper.none{border:1px dashed var(--sub)}
+.paper .ph{font-size:13px;color:var(--sub)}
+.paper .pw{font-size:40px;font-weight:700;letter-spacing:.06em;line-height:1.25;text-align:center;margin:10px 0 8px}
+.paper .pn{font-size:14px;line-height:1.6}
+/* 候補を並べて1ページに出す */
+.cand{border-top:2px solid var(--ink);padding-top:18px;margin-top:22px}
+.cand .cc{font-size:15px;color:var(--sub)}
+.cand .cv{font-size:30px;font-weight:600;line-height:1.3;margin-top:2px}
+.multi-h{font-size:22px;font-weight:600;margin-top:30px}
 </style>
 </head>
 <body>
@@ -1846,14 +1864,7 @@ function synonymFirst(word){
 function render(word){
   // 0. 「AとB」は分けて出す
   const multi = splitMulti(word);
-  if(multi){
-    out.innerHTML = `<div class="card">
-      <div class="pick">${esc(word)} は2つ以上あります。1つずつ調べてください。</div>
-      ${multi.map((m,i)=>`<button class="opt" data-w="${esc(m)}"><span class="oc">${esc(m)}</span><span class="oa">→ 調べる</span></button>`).join("")}
-    </div>`;
-    out.querySelectorAll('.opt').forEach(b=>{ b.onclick = () => render(b.dataset.w); });
-    return;
-  }
+  if(multi){ return renderMulti(word, multi); }
   // 1. 早見表に同じ名前がある（入力そのものが言い換え辞書にあり、早見表に同じ表記がなければ辞書を先に使う）
   const hits = synonymFirst(word) ? [] : searchWide(word);
   if(hits.length){
@@ -1883,7 +1894,103 @@ function render(word){
     renderGuessChoices(word, rows, true, "", "", escs); return;
   }
   // 4. 推定
-  guess(word); return;
+  return guess(word);
+}
+
+/* 「AとB」は、それぞれの結果を続けて1ページに出す（タップで切り替えない） */
+async function renderMulti(word, parts){
+  const blocks = [];
+  for(const p of parts){
+    await render(p);
+    blocks.push(`<div class="multi-h">「${esc(p)}」</div>${out.innerHTML}`);
+  }
+  out.innerHTML = `<div class="card quiet"><div class="pick">「${esc(word)}」は${parts.length}つあります。それぞれの出し方を続けて出します。</div></div>${blocks.join("")}`;
+}
+
+/* ========== 1ページで出す部品：出す曜日・袋に貼る紙・候補 ========== */
+/* 次の収集日を n 回分（資源ごみの隔週は同じ回だけ） */
+function nextDates(s, n){
+  const list = [];
+  if(!s || !s.days) return list;
+  const t = new Date(); t.setHours(0,0,0,0);
+  for(let i=0; i<60 && list.length<n; i++){
+    const d = new Date(t); d.setDate(t.getDate()+i);
+    if(!s.days.includes(d.getDay())) continue;
+    if(s.recycle && s.recycle !== "both"){
+      const k = recycleKind(d);
+      if(k === null){ list.push({date:d, offset:i, unsure:true}); break; }
+      if(k !== s.recycle) continue;
+    }
+    list.push({date:d, offset:i, kind:recycleKind(d)});
+  }
+  return list;
+}
+function fmtDate(x){
+  const when = x.offset===0 ? "今日" : x.offset===1 ? "明日" : `${x.offset}日後`;
+  return `${x.date.getMonth()+1}月${x.date.getDate()}日（${WD[x.date.getDay()]}）${when}`;
+}
+function dayBlock(main){
+  const s = SCHED[main] || SCHED[main.replace(/。$/,"")] || null;
+  if(!s) return `<div class="dow">出す曜日：判定できません</div><div class="caution">コールセンター（0120-264-057）で確認してください。</div>`;
+  if(!s.days) return `<div class="dow">${esc(s.label)}</div>${s.warn ? `<div class="caution">${esc(s.warn)}</div>` : ""}`;
+  const alt = s.recycle && s.recycle !== "both";
+  const days = s.days.map(i => WD[i]).join("・");
+  const head = alt ? `${days}曜日（隔週・${s.recycle}の回）` : `毎週 ${days}曜日`;
+  const strip = `<div class="week">${WD.map((w,i)=>`<span class="${s.days.includes(i) ? "on" : ""}">${w}</span>`).join("")}</div>`;
+  const nd = nextDates(s, 2);
+  let next = "";
+  if(nd.length && nd[0].unsure){
+    next = `<div class="caution">資源ごみは紙・布とビン・缶の隔週です。この日付は市のカレンダー収録期間外のため、市の資源ごみカレンダーで確認してください。</div>`;
+  } else if(nd.length){
+    next = `<div class="next">次は <b>${fmtDate(nd[0])}</b>${nd[1] && !nd[1].unsure ? `<br>その次は ${fmtDate(nd[1])}` : ""}</div>`;
+  }
+  let extra = "朝8時30分までに集積所へ。";
+  if(alt){
+    extra = `資源ごみは紙・布とビン・缶の隔週です。${esc(s.recycle)}の回の水曜日だけ出せます。` + extra;
+  } else if(s.days.includes(3)){
+    const k = nd[0] && nd[0].kind;
+    extra = `水曜は不燃ごみ・有害ごみ・資源ごみが同じ日です。${k ? `次の水曜の資源ごみは「${esc(k)}」の回。` : ""}` + extra;
+  }
+  return `<div class="dow">${esc(head)}</div>${strip}${next}<div class="caution">${extra}</div>${s.warn ? `<div class="caution">${esc(s.warn)}</div>` : ""}`;
+}
+/* 袋に貼る紙。早見表の備考に「〇〇」と明記／貼り紙 の指定があるときだけ「松戸市の指定」として出す。
+   指定がない品目に、推測で文字を書かせない。 */
+function paperBlock(r){
+  const note = r.note || "";
+  const main = r.cat.split("/")[0].trim();
+  const s = SCHED[main] || SCHED[main.replace(/。$/,"")] || null;
+  const told = [];
+  const re = /「([^」]{1,20})」\s*と(明記|貼り紙)/g;
+  let m;
+  while((m = re.exec(note)) !== null){ if(!told.includes(m[1])) told.push(m[1]); }
+  if(/新聞紙等で(包み|くるみ)/.test(note) && !told.includes("危険")) told.push("危険");
+  if(told.length){
+    const said = note.split("。").filter(x => /明記|貼り紙|新聞紙等で(包み|くるみ)/.test(x)).map(x => x + "。").join("");
+    return `<div class="paper">
+      <div class="ph">袋に貼る紙に書く文字（松戸市の指定）</div>
+      <div class="pw">${told.map(esc).join("<br>")}</div>
+      <div class="pn">紙に大きく書いて袋に貼るか、袋に直接書きます。<br>市の記載：${esc(said)}</div>
+    </div>`;
+  }
+  if(!s || !s.days) return "";   // 集積所に出さないものは貼り紙の対象外
+  return `<div class="paper none">
+    <div class="ph">袋に貼る紙</div>
+    <div class="pn">早見表には、この品目で紙に書く文字の指定はありません。区分と曜日を守って集積所に出します。</div>
+  </div>`;
+}
+/* 候補1件分を、区分・曜日・貼り紙・根拠まで全部出す */
+function candBlock(r, why){
+  const cats = r.cat.split("/").map(x => x.trim());
+  const main = cats[0];
+  const cond = condLabel(r.item);
+  return `<div class="cand">
+    <div class="cc">${esc(cond || r.item)}</div>
+    <div class="cv">${esc(main.replace(/^※/,""))}</div>
+    ${cats.length > 1 ? `<div class="caution">区分の表記：${esc(r.cat)}（条件で変わります。下の備考を確認してください）</div>` : ""}
+    ${dayBlock(main)}
+    ${paperBlock(r)}
+    <div class="src">早見表：${esc(r.item)}${r.note ? `<br>備考：${esc(r.note)}` : ""}${why ? `<br>${esc(why)}` : ""}<br><a href="${r.src}" target="_blank" rel="noopener">出典：松戸市 家庭ごみの分別早見表「${esc(r.page)}」</a></div>
+  </div>`;
 }
 
 function optionHtml(r, i, extra){
@@ -1923,14 +2030,11 @@ function renderChoices(word, hits){
   const list = sortMetalFirst(hits, x=>x.item);
   const escs = escalatorsFor(word, hits.map(h=>h.note).join(" "));
   out.innerHTML = `<div class="card">
-    <div class="pick">「${esc(word)}」は、実物の素材と大きさで出す日が変わります。当てはまるものを選んでください。</div>
+    <div class="pick">「${esc(word)}」は、実物の素材と大きさで出す日が変わります。下に全部並べました。実物に当てはまるものを見てください。</div>
     ${escBlock(escs)}
-    <div class="assume">金属は一部でも入っていれば「金属が使われている」を選びます。ネジ・バネ・軸・金具・芯線も金属です。</div>
-    ${list.map((h,i)=>optionHtml(h,i)).join("")}
+    <div class="assume">金属は一部でも入っていれば「金属が使われている」に当てはまります。ネジ・バネ・軸・金具・芯線も金属です。</div>
+    ${list.map(h=>candBlock(h)).join("")}
   </div>`;
-  out.querySelectorAll('.opt').forEach(b=>{
-    b.onclick = () => renderVerdict(list[+b.dataset.i]);
-  });
 }
 
 async function guess(word){
@@ -2017,20 +2121,16 @@ function offlineGuess(word){
 function renderGuessChoices(word, rows, splitCats, assumption, metal, escs){
   const list = sortMetalFirst(rows, x=>x.r.item);
   const head = splitCats
-    ? `「${esc(word)}」は早見表に同じ名前がなく、<b>候補によって区分が変わります</b>。ここでは1つに決めません。実物に当てはまるものを選んでください。`
-    : `「${esc(word)}」は早見表に同じ名前がありません。近い品目から探しました。実物に当てはまるものを選んでください。`;
+    ? `「${esc(word)}」は早見表に同じ名前がなく、<b>候補によって区分が変わります</b>。ここでは1つに決めません。下に全部並べました。実物に当てはまるものを見てください。`
+    : `「${esc(word)}」は早見表に同じ名前がありません。近い品目から探しました。下に全部並べました。実物に当てはまるものを見てください。`;
   out.innerHTML = `<div class="card">
     <div class="pick">${head}</div>
     ${escBlock(escs)}
-    <div class="assume">金属は一部でも入っていれば「金属が使われている」を選びます。ネジ・バネ・軸・金具・芯線も金属です。</div>
+    <div class="assume">金属は一部でも入っていれば「金属が使われている」に当てはまります。ネジ・バネ・軸・金具・芯線も金属です。</div>
     ${metal ? `<div class="assume"><b>金属を含むものとして扱いました</b>（${esc(metal)}）。一部でも金属が入っていれば、見た目がプラスチックでも不燃ごみ側です。金属がまったく入っていない場合は、この候補は当てはまりません。</div>` : ""}
     ${assumption ? `<div class="assume">判断に使った前提：${esc(assumption)}　違っていればこの前提を読み替えてください</div>` : ""}
-    ${list.map((x,i)=>optionHtml(x.r,i,x.why)).join("")}
+    ${list.map(x=>candBlock(x.r, x.why)).join("")}
   </div>`;
-  out.querySelectorAll('.opt').forEach(b=>{
-    const x = list[+b.dataset.i];
-    b.onclick = () => renderVerdict(x.r, {word, why:x.why, from:x.from, assumption, metal:x.metal});
-  });
 }
 
 function renderUnknown(word){
@@ -2045,35 +2145,6 @@ function renderUnknown(word){
 function renderVerdict(r, g){
   const cats = r.cat.split("/").map(s=>s.trim());
   const main = cats[0];
-  const s = SCHED[main] || SCHED[main.replace(/。$/,"")] || null;
-  const nd = s ? nextDate(s.days, s.recycle) : null;
-
-  let dayHtml;
-  if(!s){
-    dayHtml = `<div class="day">収集日：<span class="d">判定できません</span></div>`;
-  } else if(!s.days){
-    dayHtml = `<div class="day"><span class="d">${esc(s.label)}</span></div>`;
-  } else {
-    const d = nd.date;
-    const when = nd.offset===0 ? "今日" : nd.offset===1 ? "明日" : `${nd.offset}日後`;
-    let extra = `収集曜日は毎週${esc(s.label)}。朝8時30分までに集積所へ。`;
-    if(s.recycle && s.recycle !== "both"){
-      extra = nd.unsure
-        ? "資源ごみは紙・布とビン・缶の隔週です。この日付は市のカレンダー収録期間外のため、市の資源ごみカレンダーで確認してください。"
-        : `資源ごみは紙・布とビン・缶の隔週で、この日は「${esc(s.recycle)}」の回です。朝8時30分までに集積所へ。`;
-    } else if(s.days.includes(3)){
-      const k = nd.kind;
-      extra = `水曜は不燃ごみ・有害ごみ・資源ごみが同じ日です。${k?`この日の資源ごみは「${esc(k)}」の回。`:""}朝8時30分までに集積所へ。`;
-    }
-    dayHtml = `<div class="day">次の収集日：<span class="d">${d.getMonth()+1}月${d.getDate()}日（${WD[d.getDay()]}）${when}</span></div>
-      <div class="caution">${extra}</div>`;
-  }
-  const warn = s && s.warn ? `<div class="caution">${esc(s.warn)}</div>` : "";
-
-  const signs = signFor(r.cat, r.note);
-  const signHtml = signs.length
-    ? `<div class="sign">${signs.map(esc).join("<br>")}<small>この文字を紙に大きく書いて袋に貼る（または袋に直接書く）</small></div>`
-    : `<div class="card quiet"><div class="caution">この品目に、市が求める表示の指定はありません。集積所にそのまま出します。</div></div>`;
 
   const otherCats = cats.length>1
     ? `<dt>区分の表記</dt><dd>${esc(r.cat)}（条件で変わります。下の記載を確認してください）</dd>` : "";
@@ -2090,9 +2161,9 @@ function renderVerdict(r, g){
   <div class="card">
     ${badge}
     <div class="verdict">${esc(main.replace(/^※/,""))}</div>
-    ${dayHtml}
-    ${warn}
-    ${signHtml}
+    ${cats.length > 1 ? `<div class="caution">区分の表記：${esc(r.cat)}（条件で変わります。下の備考を確認してください）</div>` : ""}
+    ${dayBlock(main)}
+    ${paperBlock(r)}
 
     ${guessNote}
     ${escBlock(escalatorsFor(r.item, r.note), !/電池/.test(r.note||""))}

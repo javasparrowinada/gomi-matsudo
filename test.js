@@ -19,6 +19,10 @@
  *                         期待する主区分なら一致（素材や大きさを利用者が選ぶ語のため）
  *  (C) 壊れた入力       … 空文字・全角スペース・1文字・意味不明な文字列が「不明」になり、
  *                         候補が大量に並ばないこと（10件以上で失敗）
+ *  (D) 画面表示         … 全品目を実際の描画関数で出し、1ページで完結しているか
+ *                         （出す曜日の帯・早見表が指定する貼り紙の文字・指定がない旨・
+ *                           候補一覧にタップして切り替えるボタンが残っていないこと・
+ *                           「AとB」が両方とも同じページに出ること）
  *
  * 1件でも失敗があれば終了コード 1。
  */
@@ -63,8 +67,14 @@ let captured = null;
 let pending = null;
 const orig = {
   guess: context.guess,
-  sortMetalFirst: context.sortMetalFirst
+  sortMetalFirst: context.sortMetalFirst,
+  renderVerdict: context.renderVerdict,
+  renderChoices: context.renderChoices,
+  renderGuessChoices: context.renderGuessChoices,
+  renderUnknown: context.renderUnknown,
+  renderMulti: context.renderMulti
 };
+function installSpies() {
 context.renderVerdict = (r) => { captured = { type: "verdict", rows: [r] }; };
 context.renderChoices = (word, hits) => {
   captured = { type: "choices", rows: orig.sortMetalFirst(hits, x => x.item) };
@@ -73,13 +83,20 @@ context.renderGuessChoices = (word, rows) => {
   captured = { type: "guess", rows: orig.sortMetalFirst(rows, x => x.r.item).map(x => x.r) };
 };
 context.renderUnknown = () => { captured = { type: "unknown", rows: [] }; };
+context.renderMulti = () => { captured = { type: "multi", rows: [] }; };
 context.guess = (word) => { pending = orig.guess(word); return pending; };
+}
+function removeSpies() {
+  for (const k of ["renderVerdict", "renderChoices", "renderGuessChoices", "renderUnknown", "renderMulti", "guess"]) context[k] = orig[k];
+}
+installSpies();
 
 async function run(input) {
   captured = null; pending = null;
   const outEl = els["out"];
   outEl.innerHTML = "";
-  context.render(String(input).trim()); // 「調べる」ボタンと同じ
+  const ret = context.render(String(input).trim()); // 「調べる」ボタンと同じ
+  if (ret && typeof ret.then === "function") await ret;
   if (pending) await pending;
   if (!captured && /2つ以上あります/.test(outEl.innerHTML)) {
     const n = (outEl.innerHTML.match(/class="opt"/g) || []).length;
@@ -143,6 +160,58 @@ const mainCat = r => r.cat.split("/")[0].trim();
   console.log(`(C) 壊れた入力: ${broken.length - failC.length}/${broken.length}` + (okC ? "  OK" : "  NG"));
   failC.forEach(f => console.log(`    NG ${JSON.stringify(f.input)} → ${f.type}（候補 ${f.n} 件）${JSON.stringify(f.got)}`));
   if (!okC) failed++;
+
+  /* (D) */
+  const failD = [];
+  const outEl = els["out"];
+  const escText = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const checkRow = (r, h, where) => {
+    const main = mainCat(r);
+    const s = app.SCHED[main] || app.SCHED[main.replace(/。$/, "")];
+    const note = r.note || "";
+    const told = [...note.matchAll(/「([^」]{1,20})」\s*と(明記|貼り紙)/g)].map(m => m[1]);
+    if (/新聞紙等で(包み|くるみ)/.test(note) && !told.includes("危険")) told.push("危険");
+    if (s && s.days && !/class="week"/.test(h)) failD.push(`${where}「${r.item}」出す曜日の帯がない`);
+    for (const t of told) if (!h.includes(escText(t)) || !/class="pw"/.test(h)) failD.push(`${where}「${r.item}」貼り紙の文字「${t}」がない`);
+    if (s && s.days && !told.length && !h.includes("指定はありません")) failD.push(`${where}「${r.item}」貼り紙の指定がない旨がない`);
+    if (!told.length && /class="pw"/.test(h) && where === "確定") failD.push(`${where}「${r.item}」指定がないのに貼り紙の文字を出している`);
+  };
+  removeSpies();
+  let nVerdict = 0, nGroup = 0;
+  for (const r of app.DATA) {
+    try { outEl.innerHTML = ""; orig.renderVerdict(r); checkRow(r, outEl.innerHTML, "確定"); nVerdict++; }
+    catch (e) { failD.push(`確定「${r.item}」描画で例外：${e.message}`); }
+  }
+  const groups = {};
+  for (const r of app.DATA) (groups[app.baseName(r.item)] = groups[app.baseName(r.item)] || []).push(r);
+  for (const [base, rows] of Object.entries(groups)) {
+    if (rows.length < 2) continue;
+    try {
+      outEl.innerHTML = ""; orig.renderChoices(base, rows); nGroup++;
+      const h = outEl.innerHTML;
+      if (/class="opt"/.test(h)) failD.push(`候補「${base}」タップ用のボタンが残っている`);
+      const n = (h.match(/class="cand"/g) || []).length;
+      if (n !== rows.length) failD.push(`候補「${base}」${rows.length}件のうち ${n} 件しか出ていない`);
+      for (const r of rows) {
+        const part = h.split('<div class="cand">').find(x => x.includes(`早見表：${escText(r.item)}`)) || "";
+        checkRow(r, part, "候補");
+      }
+    } catch (e) { failD.push(`候補「${base}」描画で例外：${e.message}`); }
+  }
+  for (const w of ["アイロンと乾電池", "段ボールや雑誌"]) {
+    try {
+      outEl.innerHTML = "";
+      await context.render(w);
+      const h = outEl.innerHTML;
+      const n = (h.match(/class="multi-h"/g) || []).length;
+      if (n !== 2 || /class="opt"/.test(h) || (h.match(/class="dow"/g) || []).length < 2) failD.push(`複数「${w}」が1ページに両方出ていない`);
+    } catch (e) { failD.push(`複数「${w}」描画で例外：${e.message}`); }
+  }
+  installSpies();
+  const okD = failD.length === 0;
+  console.log(`(D) 画面表示: 確定 ${nVerdict} 品目・候補 ${nGroup} グループ・複数入力 2 件` + (okD ? "  OK" : `  NG（${failD.length} 件）`));
+  failD.slice(0, 30).forEach(f => console.log(`    NG ${f}`));
+  if (!okD) failed++;
 
   console.log(failed ? `\n失敗 ${failed} 項目` : "\nすべて合格");
   process.exit(failed ? 1 : 0);
