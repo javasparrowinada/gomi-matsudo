@@ -15,8 +15,9 @@
  *                         （分別区分の "/" より前）が「期待する主区分」と一致するか。
  *                         主区分が期待値で始まっていれば一致とみなす
  *                         （例：期待「※不燃ごみ」＝実際「※不燃ごみ・資源ごみの日に回収」）
- *                         "判定":"候補に含む" を付けた行は、先頭でなくても画面の候補のどれかが
- *                         期待する主区分なら一致（素材や大きさを利用者が選ぶ語のため）
+ *                         "判定":"候補に含む" を付けた行は、先頭でなくても画面の候補の行の
+ *                         区分表記（"/" 区切りの全部）のどれかが期待する区分なら一致
+ *                         （素材や大きさ・電池の有無を利用者が見て選ぶ語のため）
  *  (C) 壊れた入力       … 空文字・全角スペース・1文字・意味不明な文字列が「不明」になり、
  *                         候補が大量に並ばないこと（10件以上で失敗）
  *  (D) 画面表示         … 全品目を実際の描画関数で出し、1ページで完結しているか
@@ -140,7 +141,10 @@ const mainCat = r => r.cat.split("/")[0].trim();
     const res = await run(input);
     const match = r => { const g = mainCat(r); return g === expected || g.startsWith(expected); };
     const anyRow = c["判定"] === "候補に含む";
-    const first = anyRow ? (res.rows.find(match) || res.rows[0]) : res.rows[0];
+    // 「候補に含む」は、画面の候補の行の区分表記（「有害ごみ/不燃ごみ/粗大ごみ」の全部）のどれかが期待する区分なら一致
+    const matchAny = r => r.cat.split("/").map(x => x.trim()).some(g => g === expected || g.startsWith(expected));
+    const hitRow = anyRow ? res.rows.find(matchAny) : null;
+    const first = anyRow ? (hitRow ? Object.assign({}, hitRow, { cat: hitRow.cat.split("/").map(x => x.trim()).find(g => g === expected || g.startsWith(expected)) }) : res.rows[0]) : res.rows[0];
     const got = first ? mainCat(first) : `（${res.type}）`;
     const ok = !!first && match(first);
     if (!ok) failB.push({ input, expected, got, item: first && first.item, type: res.type });
