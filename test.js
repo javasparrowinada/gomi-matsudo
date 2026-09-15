@@ -57,7 +57,7 @@ vm.createContext(context);
 vm.runInContext(
   m[1] + `
 ;globalThis.__app = { PAGES, DATA, SYNONYMS, PREFIX_DROP, ESCALATORS, SCHED,
-  variants, norm, baseName, searchExact, searchPartial, synonymHits, localGuess, noteCases };`,
+  variants, norm, baseName, searchExact, searchPartial, synonymHits, localGuess, noteCases, PARTS, PART_WORDS };`,
   context, { filename: "index.html<script>" }
 );
 const app = context.__app;
@@ -72,7 +72,9 @@ const orig = {
   renderChoices: context.renderChoices,
   renderGuessChoices: context.renderGuessChoices,
   renderUnknown: context.renderUnknown,
-  renderMulti: context.renderMulti
+  renderMulti: context.renderMulti,
+  renderParts: context.renderParts,
+  renderCategory: context.renderCategory
 };
 function installSpies() {
 context.renderVerdict = (r) => { captured = { type: "verdict", rows: [r] }; };
@@ -84,10 +86,12 @@ context.renderGuessChoices = (word, rows) => {
 };
 context.renderUnknown = () => { captured = { type: "unknown", rows: [] }; };
 context.renderMulti = () => { captured = { type: "multi", rows: [] }; };
+context.renderParts = (word, parts) => { captured = { type: "parts", rows: parts.flatMap(p => p.rowsFound) }; };
+context.renderCategory = (word, cats) => { captured = { type: "category", rows: cats.map(c => ({ item: c, cat: c, note: "" })) }; };
 context.guess = (word) => { pending = orig.guess(word); return pending; };
 }
 function removeSpies() {
-  for (const k of ["renderVerdict", "renderChoices", "renderGuessChoices", "renderUnknown", "renderMulti", "guess"]) context[k] = orig[k];
+  for (const k of ["renderVerdict", "renderChoices", "renderGuessChoices", "renderUnknown", "renderMulti", "renderParts", "renderCategory", "guess"]) context[k] = orig[k];
 }
 installSpies();
 
@@ -172,6 +176,11 @@ const mainCat = r => r.cat.split("/")[0].trim();
     const told = [...note.matchAll(/「([^」]{1,20})」\s*と(明記|貼り紙)/g)].map(m => m[1]);
     if (/新聞紙等で(包み|くるみ)/.test(note) && !told.includes("危険")) told.push("危険");
     if (s && s.days && !/class="week"/.test(h)) failD.push(`${where}「${r.item}」出す曜日の帯がない`);
+    // 150×30mm の貼り紙：集積所に出せる区分が1つでもあれば、区分・品目・回収曜日の枠がある
+    const anyDays = r.cat.split("/").some(c => { const x = app.SCHED[c.trim()] || app.SCHED[c.trim().replace(/。$/, "")]; return x && x.days; });
+    if (anyDays && !/class="label"/.test(h)) failD.push(`${where}「${r.item}」貼り紙の枠がない`);
+    if (anyDays && !/曜日回収/.test(h)) failD.push(`${where}「${r.item}」貼り紙に回収曜日がない`);
+    for (const t of told) if (/class="label"/.test(h) && !new RegExp(`class="lc (lx|lk|ln)"[^>]*>${escText(t)}`).test(h) && !h.includes(`>${escText(t)}<`)) failD.push(`${where}「${r.item}」貼り紙の枠に指定の文字「${t}」がない`);
     for (const t of told) if (!h.includes(escText(t)) || !/class="pw"/.test(h)) failD.push(`${where}「${r.item}」貼り紙の文字「${t}」がない`);
     if (s && s.days && !told.length && !h.includes("指定はありません")) failD.push(`${where}「${r.item}」貼り紙の指定がない旨がない`);
     if (!told.length && /class="pw"/.test(h) && where === "確定") failD.push(`${where}「${r.item}」指定がないのに貼り紙の文字を出している`);
@@ -219,9 +228,34 @@ const mainCat = r => r.cat.split("/")[0].trim();
       if (n !== 2 || /class="opt"/.test(h) || (h.match(/class="dow"/g) || []).length < 2) failD.push(`複数「${w}」が1ページに両方出ていない`);
     } catch (e) { failD.push(`複数「${w}」描画で例外：${e.message}`); }
   }
+  // 部材から推定：根拠にする早見表の行が実在するか、見立てた部材がすべて表示されるか
+  for (const p of app.PARTS) for (const n of p.rows) if (!app.DATA.find(r => r.item === n)) failD.push(`部材「${p.name}」の根拠の行「${n}」が早見表にない`);
+  for (const [k, ids] of Object.entries(app.PART_WORDS)) for (const id of ids) if (!app.PARTS.find(p => p.id === id)) failD.push(`部材の見立て「${k}」の部材「${id}」が定義にない`);
+  for (const w of ["燃えないゴミ", "資源ごみ"]) {
+    try {
+      outEl.innerHTML = ""; await context.render(w); const h = outEl.innerHTML;
+      if (!/class="week"/.test(h) || !/class="label"/.test(h) || !/品目（\d+種類）/.test(h)) failD.push(`区分名「${w}」の案内が出ていない`);
+    } catch (e) { failD.push(`区分名「${w}」描画で例外：${e.message}`); }
+  }
+  for (const w of ["引っ越しごみ", "遺品"]) {
+    try {
+      outEl.innerHTML = ""; await context.render(w); const h = outEl.innerHTML;
+      const n = (h.match(/class="case"/g) || []).length;
+      if (!h.includes("実物で確かめる順番") || n < 13) failD.push(`名前だけの「${w}」に確かめる順番が出ていない（${n}項目）`);
+    } catch (e) { failD.push(`名前だけの「${w}」描画で例外：${e.message}`); }
+  }
+  for (const w of ["スマホの充電台", "補聴器", "ワイパー", "ピーラー", "家電"]) {
+    try {
+      outEl.innerHTML = "";
+      await context.render(w);
+      const h = outEl.innerHTML;
+      const n = (h.match(/<div class="ch">[①-⑨]/g) || []).length;
+      if (!h.includes("部材から考えました") || !n || !/class="week"/.test(h) || !h.includes("実物で確かめる順番")) failD.push(`部材「${w}」が部材からの推定として出ていない`);
+    } catch (e) { failD.push(`部材「${w}」描画で例外：${e.message}`); }
+  }
   installSpies();
   const okD = failD.length === 0;
-  console.log(`(D) 画面表示: 確定 ${nVerdict} 品目・候補 ${nGroup} グループ・複数入力 2 件` + (okD ? "  OK" : `  NG（${failD.length} 件）`));
+  console.log(`(D) 画面表示: 確定 ${nVerdict} 品目・候補 ${nGroup} グループ・複数入力 2 件・部材推定 5 件・区分名 2 件・確かめる順番 2 件` + (okD ? "  OK" : `  NG（${failD.length} 件）`));
   failD.slice(0, 30).forEach(f => console.log(`    NG ${f}`));
   if (!okD) failed++;
 
