@@ -57,7 +57,7 @@ vm.createContext(context);
 vm.runInContext(
   m[1] + `
 ;globalThis.__app = { PAGES, DATA, SYNONYMS, PREFIX_DROP, ESCALATORS, SCHED,
-  variants, norm, baseName, searchExact, searchPartial, synonymHits, localGuess };`,
+  variants, norm, baseName, searchExact, searchPartial, synonymHits, localGuess, noteCases };`,
   context, { filename: "index.html<script>" }
 );
 const app = context.__app;
@@ -175,6 +175,18 @@ const mainCat = r => r.cat.split("/")[0].trim();
     for (const t of told) if (!h.includes(escText(t)) || !/class="pw"/.test(h)) failD.push(`${where}「${r.item}」貼り紙の文字「${t}」がない`);
     if (s && s.days && !told.length && !h.includes("指定はありません")) failD.push(`${where}「${r.item}」貼り紙の指定がない旨がない`);
     if (!told.length && /class="pw"/.test(h) && where === "確定") failD.push(`${where}「${r.item}」指定がないのに貼り紙の文字を出している`);
+    // 条件で区分が分かれる品目：先頭の区分だけを大きく出して、別の区分の貼り紙を並べる食い違いを防ぐ
+    const cats = r.cat.split("/").map(x => x.trim());
+    const cs = app.noteCases(note);
+    if (cats.length > 1 && cs.length) {
+      if (!h.includes("条件で分かれます")) failD.push(`${where}「${r.item}」条件で分かれるのに1つの区分だけを出している`);
+      for (const c of cats) {
+        const n = c.replace(/^※/, "").replace(/。$/, "");
+        if (app.SCHED[c] && !h.includes(escText(n))) failD.push(`${where}「${r.item}」区分「${n}」が場合分けに出ていない`);
+      }
+      if (cs.some(c => c.battery) && !(h.includes("電池が入っていない場合") && h.includes("電池が入っている場合"))) failD.push(`${where}「${r.item}」電池の有無で分けていない`);
+      if (h.includes("電池がない場合の記載はありません")) failD.push(`${where}「${r.item}」電池がない場合の出し方が取り出せていない`);
+    }
   };
   removeSpies();
   let nVerdict = 0, nGroup = 0;

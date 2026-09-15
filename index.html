@@ -111,6 +111,17 @@ a{color:var(--ink)}
 .cand .cc{font-size:15px;color:var(--sub)}
 .cand .cv{font-size:30px;font-weight:600;line-height:1.3;margin-top:2px}
 .multi-h{font-size:22px;font-weight:600;margin-top:30px}
+/* 条件で区分が分かれる品目の場合分け */
+.ch{font-size:17px;font-weight:700;margin-top:20px;padding:8px 12px;background:var(--ink);color:var(--paper)}
+.case{border-left:4px solid var(--ink);padding:2px 0 6px 12px;margin-top:14px}
+.case .cl{font-size:16px;line-height:1.5}
+.case .ccat{font-size:26px;font-weight:700;line-height:1.3;margin-top:2px}
+.case .dow{font-size:18px;margin-top:6px}
+.case .week{margin-top:6px}
+.case .week span{font-size:14px;padding:6px 0}
+.case .next{font-size:15px;margin-top:6px}
+.case .paper{margin-top:10px}
+.case .paper .pw{font-size:32px}
 </style>
 </head>
 <body>
@@ -1796,7 +1807,15 @@ function condLabel(item){
   if(!m) return "";
   let t = m.map(x=>x.replace(/^[(（]|[)）]$/g,"")).join("・");
   t = t.replace(/センチメートル/g,"センチ").replace(/メートル/g,"m");
-  const parts = t.split(/[・、,]/).map(x=>x.trim()).filter(Boolean);
+  let parts = t.split(/[・、,]/).map(x=>x.trim()).filter(Boolean);
+  // 「金属製・プラスチック製」のように素材が2つ以上並ぶのは「どれでも同じ扱い」の意味。
+  // 1つずつ言い換えると「金属が使われている／金属部品なし」と矛盾して見えるので、まとめて出す
+  const mats = parts.filter(x => /^[^0-9]+製$/.test(x));
+  if(mats.length >= 2){
+    const at = parts.indexOf(mats[0]);
+    parts = parts.filter(x => !mats.includes(x));
+    parts.splice(at, 0, `${mats.join("・")}のどれでも同じ扱い`);
+  }
   const out = [];
   parts.forEach(x=>{
     if(/^金属製$/.test(x))            out.push("一部でも金属が使われている");
@@ -1929,7 +1948,7 @@ function fmtDate(x){
   const when = x.offset===0 ? "今日" : x.offset===1 ? "明日" : `${x.offset}日後`;
   return `${x.date.getMonth()+1}月${x.date.getDate()}日（${WD[x.date.getDay()]}）${when}`;
 }
-function dayBlock(main){
+function dayBlock(main, compact){
   const s = SCHED[main] || SCHED[main.replace(/。$/,"")] || null;
   if(!s) return `<div class="dow">出す曜日：判定できません</div><div class="caution">コールセンター（0120-264-057）で確認してください。</div>`;
   if(!s.days) return `<div class="dow">${esc(s.label)}</div>${s.warn ? `<div class="caution">${esc(s.warn)}</div>` : ""}`;
@@ -1942,8 +1961,9 @@ function dayBlock(main){
   if(nd.length && nd[0].unsure){
     next = `<div class="caution">資源ごみは紙・布とビン・缶の隔週です。この日付は市のカレンダー収録期間外のため、市の資源ごみカレンダーで確認してください。</div>`;
   } else if(nd.length){
-    next = `<div class="next">次は <b>${fmtDate(nd[0])}</b>${nd[1] && !nd[1].unsure ? `<br>その次は ${fmtDate(nd[1])}` : ""}</div>`;
+    next = `<div class="next">次は <b>${fmtDate(nd[0])}</b>${!compact && nd[1] && !nd[1].unsure ? `<br>その次は ${fmtDate(nd[1])}` : ""}</div>`;
   }
+  if(compact) return `<div class="dow">${esc(head)}</div>${strip}${next}${alt ? `<div class="caution">紙・布とビン・缶の隔週です。</div>` : ""}${s.warn ? `<div class="caution">${esc(s.warn)}</div>` : ""}`;
   let extra = "朝8時30分までに集積所へ。";
   if(alt){
     extra = `資源ごみは紙・布とビン・缶の隔週です。${esc(s.recycle)}の回の水曜日だけ出せます。` + extra;
@@ -1955,8 +1975,11 @@ function dayBlock(main){
 }
 /* 袋に貼る紙。早見表の備考に「〇〇」と明記／貼り紙 の指定があるときだけ「松戸市の指定」として出す。
    指定がない品目に、推測で文字を書かせない。 */
-function paperBlock(r){
-  const note = r.note || "";
+function paperBlock(r, generalOnly){
+  // generalOnly：場合分けで出すときは、区分名を含まない文（品目全体に当てはまる指示）だけを使う
+  const note = generalOnly
+    ? (r.note || "").split("。").filter(x => !noteCases(x).length).join("。")
+    : (r.note || "");
   const main = r.cat.split("/")[0].trim();
   const s = SCHED[main] || SCHED[main.replace(/。$/,"")] || null;
   const told = [];
@@ -1964,6 +1987,7 @@ function paperBlock(r){
   let m;
   while((m = re.exec(note)) !== null){ if(!told.includes(m[1])) told.push(m[1]); }
   if(/新聞紙等で(包み|くるみ)/.test(note) && !told.includes("危険")) told.push("危険");
+  if(generalOnly && !told.length) return "";
   if(told.length){
     const said = note.split("。").filter(x => /明記|貼り紙|新聞紙等で(包み|くるみ)/.test(x)).map(x => x + "。").join("");
     return `<div class="paper">
@@ -1978,17 +2002,97 @@ function paperBlock(r){
     <div class="pn">早見表には、この品目で紙に書く文字の指定はありません。区分と曜日を守って集積所に出します。</div>
   </div>`;
 }
-/* 候補1件分を、区分・曜日・貼り紙・根拠まで全部出す */
-function candBlock(r, why){
+/* ========== 備考を「場合 → 区分」に分ける ==========
+   早見表の備考は「50センチメートル未満は「不燃ごみ」に出してください」のような文の集まり。
+   区分名（SCHED にある名前）を「」で含む文を、場合ごとに1件ずつ取り出す。区分は必ず備考の文字どおり。 */
+function catName(x){
+  if(SCHED[x]) return x;
+  const y = x.replace(/。$/,"");
+  return SCHED[y] ? y : null;
+}
+function noteCases(note){
+  const cases = [];
+  (note||"").split("。").map(s => s.trim()).filter(Boolean).forEach(sent => {
+    const battery = /電池|バッテリー/.test(sent);
+    // 区分名は「」付きが基本。「50センチメートル未満の本体は不燃ごみに出してください」のような「」なしも拾う
+    const bare = Object.keys(SCHED).filter(k => !/^※/.test(k)).sort((a,b) => b.length - a.length).map(k => k.replace(/[()（）]/g, "\\$&")).join("|");
+    const segs = [...sent.matchAll(new RegExp(`「([^」]+)」|(${bare})(?=(に|で|へ|として)出)`, "g"))]
+      .map(m => { m[1] = m[1] || m[2]; return m; })
+      .filter(m => catName(m[1]));
+    let start = 0, head = "";
+    segs.forEach((m, i) => {
+      // 「50センチ未満は「A」、50センチ以上は「B」に出す」は、読点で2つの場合に分ける
+      const after = m.index + m[0].length;
+      const comma = sent.indexOf("、", after);
+      const last = i + 1 >= segs.length;
+      const next = last ? sent.length : ((comma !== -1 && comma < segs[i+1].index) ? comma + 1 : after);
+      const piece = sent.slice(start, next);
+      let label = sent.slice(start, m.index).replace(/^[、\s]+/, "").trim();
+      if(i === 0){ const h = label.match(/^(.*?もので)/); head = h ? h[1] : ""; }
+      else if(head && !label.startsWith(head)) label = head + label;
+      // 「取り外しできるものは小型充電式電池を…ポリ袋に」のように長いときは「〜ものは」までを見出しにする
+      const q = label.indexOf("「"), ha = label.search(/(もの|場合)は/);
+      if(ha > 0 && (q === -1 || ha < q)) label = label.slice(0, label.indexOf("は", ha) + 1);
+      label = label.replace(/[は、]+$/, "").replace(/センチメートル/g, "センチ").replace(/メートル/g, "m");
+      const signs = [...piece.matchAll(/「([^」]{1,20})」\s*と(明記|貼り紙)/g)].map(x => x[1]);
+      cases.push({label: label || "この品目", cat: catName(m[1]), signs, battery, said: sent + "。"});
+      start = next;
+    });
+  });
+  return cases;
+}
+/* 区分・曜日・貼り紙。条件で区分が分かれる品目は、場合ごとに並べる（電池の有無で見出しを分ける） */
+function howBlock(r, bigClass){
   const cats = r.cat.split("/").map(x => x.trim());
   const main = cats[0];
+  const cs = noteCases(r.note);
+  const useCases = cs.length && (cats.length > 1 || cs.some(c => c.cat !== catName(main)));
+  if(!useCases){
+    return `<div class="${bigClass}">${esc(main.replace(/^※/,""))}</div>
+      ${cats.length > 1 ? `<div class="caution">区分の表記：${esc(r.cat)}（条件で変わります。下の備考を確認してください）</div>` : ""}
+      ${dayBlock(main)}
+      ${paperBlock(r)}`;
+  }
+  // 早見表の分別区分のうち、備考のどの場合にも出てこない区分は「上に当てはまらない場合」として最後に置く（区分を落とさない）
+  const sameCat = (a, b) => a === b || a.startsWith(b) || b.startsWith(a);   // 「資源ごみ」と「資源ごみ(紙類・布類)」は同じ
+  // 備考の「資源ごみ」は、早見表の分別区分に「資源ごみ(紙類・布類)」があればそちらで出す（隔週の回まで分かるように）
+  cs.forEach(x => { const full = cats.map(c => catName(c) || c).find(c => c.length > x.cat.length && c.startsWith(x.cat)); if(full) x.cat = full; });
+  const left = cats.filter(c => !cs.some(x => sameCat(x.cat, catName(c) || c)));
+  left.forEach(c => cs.push({
+    label: left.length === 1 ? "上に当てはまらない場合（早見表の分別区分）" : `上に当てはまらない場合（早見表の分別区分は「${r.cat}」。どれになるかは備考を確認）`,
+    cat: catName(c) || c, signs: [], battery: false, said: ""}));
+  const caseHtml = c => `<div class="case">
+      <div class="cl">${esc(c.label)}</div>
+      <div class="ccat">→ ${esc(c.cat.replace(/^※/,""))}</div>
+      ${dayBlock(c.cat, true)}
+      ${c.signs.length ? `<div class="paper"><div class="ph">袋に貼る紙に書く文字（松戸市の指定）</div><div class="pw">${c.signs.map(esc).join("<br>")}</div><div class="pn">市の記載：${esc(c.said)}</div></div>` : ""}
+    </div>`;
+  const bat = cs.filter(c => c.battery), plain = cs.filter(c => !c.battery);
+  let body = "";
+  if(bat.length){
+    body += `<div class="ch">電池が入っていない場合（電池を抜いた後の本体も）</div>`
+      + (plain.length ? plain.map(caseHtml).join("") : `<div class="case"><div class="cl">早見表に、電池がない場合の記載はありません。コールセンター（0120-264-057）で確認してください。</div></div>`);
+    body += `<div class="ch">電池が入っている場合</div>` + bat.map(caseHtml).join("");
+  } else {
+    body += `<div class="ch">当てはまる場合を見てください</div>` + plain.map(caseHtml).join("");
+  }
+  const anySign = cs.some(c => c.signs.length);
+  const general = paperBlock(r, true);
+  const s = SCHED[main] || SCHED[main.replace(/。$/,"")] || null;
+  const none = !anySign && !general && s && s.days
+    ? `<div class="paper none"><div class="ph">袋に貼る紙</div><div class="pn">早見表には、この品目で紙に書く文字の指定はありません。区分と曜日を守って集積所に出します。</div></div>` : "";
+  const names = [...new Set(cs.map(c => c.cat.replace(/^※/,"")))];
+  return `<div class="${bigClass}">条件で分かれます</div>
+    <div class="caution">${esc(names.join("・"))}</div>
+    ${body}
+    ${general}${none}`;
+}
+/* 候補1件分を、区分・曜日・貼り紙・根拠まで全部出す */
+function candBlock(r, why){
   const cond = condLabel(r.item);
   return `<div class="cand">
     <div class="cc">${esc(cond || r.item)}</div>
-    <div class="cv">${esc(main.replace(/^※/,""))}</div>
-    ${cats.length > 1 ? `<div class="caution">区分の表記：${esc(r.cat)}（条件で変わります。下の備考を確認してください）</div>` : ""}
-    ${dayBlock(main)}
-    ${paperBlock(r)}
+    ${howBlock(r, "cv")}
     <div class="src">早見表：${esc(r.item)}${r.note ? `<br>備考：${esc(r.note)}` : ""}${why ? `<br>${esc(why)}` : ""}<br><a href="${r.src}" target="_blank" rel="noopener">出典：松戸市 家庭ごみの分別早見表「${esc(r.page)}」</a></div>
   </div>`;
 }
@@ -2031,8 +2135,8 @@ function renderChoices(word, hits){
   const escs = escalatorsFor(word, hits.map(h=>h.note).join(" "));
   out.innerHTML = `<div class="card">
     <div class="pick">「${esc(word)}」は、実物の素材と大きさで出す日が変わります。下に全部並べました。実物に当てはまるものを見てください。</div>
-    ${escBlock(escs)}
-    <div class="assume">金属は一部でも入っていれば「金属が使われている」に当てはまります。ネジ・バネ・軸・金具・芯線も金属です。</div>
+    ${escBlock(escs, !list.every(h => /電池/.test(h.note||"")))}
+    <div class="assume">金属は一部でも入っていれば金属製として扱います。ネジ・バネ・軸・金具・芯線も金属です。</div>
     ${list.map(h=>candBlock(h)).join("")}
   </div>`;
 }
@@ -2125,8 +2229,8 @@ function renderGuessChoices(word, rows, splitCats, assumption, metal, escs){
     : `「${esc(word)}」は早見表に同じ名前がありません。近い品目から探しました。下に全部並べました。実物に当てはまるものを見てください。`;
   out.innerHTML = `<div class="card">
     <div class="pick">${head}</div>
-    ${escBlock(escs)}
-    <div class="assume">金属は一部でも入っていれば「金属が使われている」に当てはまります。ネジ・バネ・軸・金具・芯線も金属です。</div>
+    ${escBlock(escs, !list.every(x => /電池/.test(x.r.note||"")))}
+    <div class="assume">金属は一部でも入っていれば金属製として扱います。ネジ・バネ・軸・金具・芯線も金属です。</div>
     ${metal ? `<div class="assume"><b>金属を含むものとして扱いました</b>（${esc(metal)}）。一部でも金属が入っていれば、見た目がプラスチックでも不燃ごみ側です。金属がまったく入っていない場合は、この候補は当てはまりません。</div>` : ""}
     ${assumption ? `<div class="assume">判断に使った前提：${esc(assumption)}　違っていればこの前提を読み替えてください</div>` : ""}
     ${list.map(x=>candBlock(x.r, x.why)).join("")}
@@ -2160,10 +2264,7 @@ function renderVerdict(r, g){
   out.innerHTML = `
   <div class="card">
     ${badge}
-    <div class="verdict">${esc(main.replace(/^※/,""))}</div>
-    ${cats.length > 1 ? `<div class="caution">区分の表記：${esc(r.cat)}（条件で変わります。下の備考を確認してください）</div>` : ""}
-    ${dayBlock(main)}
-    ${paperBlock(r)}
+    ${howBlock(r, "verdict")}
 
     ${guessNote}
     ${escBlock(escalatorsFor(r.item, r.note), !/電池/.test(r.note||""))}
