@@ -1912,7 +1912,7 @@ function renderCategory(word, cats){
       return `<div class="cand">
         <div class="cv">${esc(c)}</div>
         ${dayBlock(c)}
-        ${labelCard(c, "（品目名）", [])}
+        ${labelCard(c, "", [])}
         <div class="caution" style="margin-top:12px">早見表でこの区分になっている品目（${names.length}種類）の例：${esc(names.slice(0, 20).join("、"))}${names.length > 20 ? " ほか" : ""}</div>
       </div>`;
     }).join("")}
@@ -2098,7 +2098,7 @@ function labelCard(cat, name, signs){
   const days = s.days.map(i => WD[i]).join("・") + "曜日回収";
   const alt = s.recycle && s.recycle !== "both" ? `隔週・${s.recycle}の回` : "";
   const extra = (signs||[]).filter(x => x !== c && x !== name);
-  const k = extra.length + 3;
+  const k = extra.length + (name ? 3 : 2);
   // 文字の大きさは枠の幅（cqw）に対して文字数で決める。7文字までは1行、それより長い区分名は2行に収める
   const cell = (t, cls, sub) => {
     const n = Math.max([...t].length, 3);
@@ -2107,8 +2107,22 @@ function labelCard(cat, name, signs){
   };
   return `<div class="label-wrap">
     <div class="ph">貼り紙（150×30mm の比率。この枠をスクショして印刷できます）${extra.length ? "　白抜きは松戸市が書くよう指定している文字" : ""}</div>
-    <div class="label">${extra.map(x => cell(x, "lx")).join("")}${cell(c, "lk")}${cell(name, "ln")}${cell(days, "ld", alt)}</div>
+    <div class="label">${extra.map(x => cell(x, "lx")).join("")}${cell(c, "lk")}${name ? cell(name, "ln") : ""}${cell(days, "ld", alt)}</div>
   </div>`;
+}
+/* 貼り紙の品目名。入力した言葉は使わず、早見表の品目名か決まった呼び方にする。
+   電池の場合は、取り外した電池そのものか、電池が内蔵された本体かで名前を変える */
+function caseLabelName(c, itemName){
+  if(!c.battery) return itemName;
+  if(/乾電池|コイン電池/.test(c.label)) return "乾電池・コイン電池";
+  if(/取り外しできる|取り外せる/.test(c.label)) return "小型充電式電池";
+  return `${itemName}（バッテリー内蔵）`;
+}
+function materialLabelName(item){
+  if(/金属製/.test(item)) return "金属製品";
+  if(/プラスチック製/.test(item)) return "プラスチック製品";
+  if(/木製/.test(item)) return "木製品";
+  return baseName(item);
 }
 function howBlock(r, bigClass, name){
   const cats = r.cat.split("/").map(x => x.trim());
@@ -2135,7 +2149,7 @@ function howBlock(r, bigClass, name){
       <div class="cl">${esc(c.label)}</div>
       <div class="ccat">→ ${esc(c.cat.replace(/^※/,""))}</div>
       ${dayBlock(c.cat, true)}
-      ${labelCard(c.cat, itemName, generalSigns.concat(c.signs))}
+      ${labelCard(c.cat, caseLabelName(c, itemName), generalSigns.concat(c.signs))}
     </div>`;
   const bat = cs.filter(c => c.battery), plain = cs.filter(c => !c.battery);
   let body = "";
@@ -2317,32 +2331,32 @@ const PARTS = [
   { id:"furniture", name:"家具", noCheck:true, detect:/家具|インテリア/, list:true,
     say:"家具は、早見表では多くが粗大ごみです（素材や大きさにかかわらず）。代表的なものを挙げます。名前で調べ直すと確実です。",
     rows:["タンス","テーブル(どの素材でも)","本棚(どの素材でも)","机(どの素材でも)","ソファー(腰掛ける人数3人分までを1点扱い)","ベッド"] },
-  { id:"electric", ask:"電池が入っている、または電気で動く（コード・充電・スイッチがある）", name:"電気で動く部品・電池",
+  { id:"electric", labelName:"家電製品", ask:"電池が入っている、または電気で動く（コード・充電・スイッチがある）", name:"電気で動く部品・電池",
     detect:/充電|電源|電動|電気|電子|電化|電池|バッテリ|USB|LED|ワイヤレス|ブルートゥース|BLUETOOTH|コードレス|モーター|センサ|リモコン|ライト|ランプ|イルミネーション|ヒーター|扇風|スピーカ|イヤホン|ヘッドホン|ヘッドフォン|マイク|カメラ|タイマー|デジタル|家電/i,
     say:"電気で動く小物は、早見表では電池の有無と大きさで次のように分かれています。",
     rows:["電気スタンド"], sameNote:true },
-  { id:"blade", ask:"刃やとがった部分がある", name:"刃・とがった部分",
+  { id:"blade", labelName:"刃物", ask:"刃やとがった部分がある", name:"刃・とがった部分",
     detect:/刃|カッター|ナイフ|包丁|ハサミ|はさみ|鋏|針|ノコギリ|のこぎり|カミソリ|剃刀|ピーラー|スライサー|釘|クギ|画鋲|画びょう|鎌/,
     say:"刃やとがった部分がある物は、早見表では新聞紙等でくるみ「危険」と明記して出します。",
     rows:["カッターナイフ"], sameNote:true },
-  { id:"mercury", ask:"水銀を使っている（水銀体温計など）", name:"水銀", detect:/水銀/,
+  { id:"mercury", labelName:"水銀使用製品", ask:"水銀を使っている（水銀体温計など）", name:"水銀", detect:/水銀/,
     say:"水銀を使う物は、早見表では有害ごみです。", rows:["体温計(水銀使用)"] },
-  { id:"content", ask:"ガス・スプレー・油などの中身が入る", name:"ガス・スプレー・油などの中身", detect:/スプレー|ガス|ボンベ|ライター|オイル|燃料|殺虫剤/,
+  { id:"content", labelName:"スプレー缶・ガス缶", ask:"ガス・スプレー・油などの中身が入る", name:"ガス・スプレー・油などの中身", detect:/スプレー|ガス|ボンベ|ライター|オイル|燃料|殺虫剤/,
     say:"中身が入る容器は、早見表では中身を使い切ってから出します。", rows:["スプレー缶"] },
-  { id:"furon", ask:"冷やす仕組みがある（冷水機・冷風機など）", name:"冷やす仕組み（フロン類）", detect:/冷蔵|冷凍|冷風|冷水|保冷庫|除湿|エアコン|クーラー|ワインセラー/,
+  { id:"furon", labelName:"冷却機器", ask:"冷やす仕組みがある（冷水機・冷風機など）", name:"冷やす仕組み（フロン類）", detect:/冷蔵|冷凍|冷風|冷水|保冷庫|除湿|エアコン|クーラー|ワインセラー/,
     say:"冷やす仕組みのある物は、早見表ではフロン類を使うため市では取り扱いません。", rows:["冷水機"] },
-  { id:"metal", ask:"金属でできている（一部でも金属があれば金属製）", name:"金属", material:true, detect:/金属|ステンレス|鉄製|鉄の|^鉄$|アルミ|スチール|銅|真鍮|ブリキ|アクセサリー/,
+  { id:"metal", labelName:"金属製品", ask:"金属でできている（一部でも金属があれば金属製）", name:"金属", material:true, detect:/金属|ステンレス|鉄製|鉄の|^鉄$|アルミ|スチール|銅|真鍮|ブリキ|アクセサリー/,
     say:"金属の小物は、早見表では不燃ごみです。", rows:["文具・日用品(金属製)"] },
-  { id:"plastic", ask:"金属がなく、プラスチック・シリコン・ビニールなどでできている", name:"プラスチック", material:true, detect:/プラスチック|プラ製|プラの|樹脂|シリコン|ビニール|アクリル|ナイロン/,
+  { id:"plastic", labelName:"プラスチック製品", ask:"金属がなく、プラスチック・シリコン・ビニールなどでできている", name:"プラスチック", material:true, detect:/プラスチック|プラ製|プラの|樹脂|シリコン|ビニール|アクリル|ナイロン/,
     say:"プラスチックの小物は、早見表では30センチ未満に切って「その他のプラスチックなどのごみ」です。", rows:["文具・日用品(プラスチック製・30センチメートル未満に切る)"] },
-  { id:"wood", ask:"木・竹でできている", name:"木・竹", material:true, detect:/木製|木の|竹|ウッド|木材/,
+  { id:"wood", labelName:"木製品", ask:"木・竹でできている", name:"木・竹", material:true, detect:/木製|木の|竹|ウッド|木材/,
     say:"木の小物は、早見表では50センチ未満に切って可燃ごみです。", rows:["文具・日用品(木製・50センチメートル未満に切る)"] },
-  { id:"glass", ask:"ガラスでできている", name:"ガラス", material:true, detect:/ガラス/, say:"ガラスは、早見表では大きさで分かれます。", rows:["ガラス"] },
-  { id:"ceramic", ask:"陶磁器（瀬戸物）でできている", name:"陶磁器", material:true, detect:/陶器|陶磁器|瀬戸物|セラミック|磁器/,
+  { id:"glass", labelName:"ガラス製品", ask:"ガラスでできている", name:"ガラス", material:true, detect:/ガラス/, say:"ガラスは、早見表では大きさで分かれます。", rows:["ガラス"] },
+  { id:"ceramic", labelName:"陶磁器", ask:"陶磁器（瀬戸物）でできている", name:"陶磁器", material:true, detect:/陶器|陶磁器|瀬戸物|セラミック|磁器/,
     say:"陶磁器は、早見表では食器と同じく大きさで分かれます。", rows:["食器(金属製・陶磁器製・ガラス製)"] },
-  { id:"cloth", ask:"布でできている", name:"布", material:true, detect:/布|ウール|フェルト|毛糸/,
+  { id:"cloth", labelName:"布製品", ask:"布でできている", name:"布", material:true, detect:/布|ウール|フェルト|毛糸/,
     say:"布は、早見表では資源ごみ（紙類・布類）です。", rows:["布類(衣類、エプロン、カーテン、着物、靴下、下着、布団カバーなど)"] },
-  { id:"paper", ask:"紙でできている", name:"紙", material:true, detect:/紙|ダンボール|段ボール/,
+  { id:"paper", labelName:"紙製品", ask:"紙でできている", name:"紙", material:true, detect:/紙|ダンボール|段ボール/,
     say:"紙は、早見表では資源ごみ（紙類・布類）です。", rows:["紙(書類・コピー用紙)"] },
   { id:"shape", name:"本体の素材", noCheck:true, material:true, shapeOnly:true,
     detect:/台$|スタンド|ホルダー|立て$|ラック|ケース|カバー|トレー|ボックス|箱$|入れ$|置き$|掛け$|フック|クリップ|かご$|カゴ$|グッズ|用品$|小物/,
@@ -2375,7 +2389,7 @@ function partsFor(word){
   });
   const found = [];
   for(const p of PARTS){
-    if(p.shapeOnly && found.some(x => x.material)) continue;   // 素材が名前に書いてあれば、形からの素材の見立ては出さない
+    if(p.shapeOnly && found.length) continue;   // 素材や電気・刃などを見立てられたときは、形（台・ケースなど）からの素材の見立ては出さない
     if(p.exclude && p.exclude.test(w)) continue;
     const direct = kata.match(p.detect) || (word||"").match(p.detect);
     const m = direct || (byWord[p.id] ? [byWord[p.id]] : null);
@@ -2438,8 +2452,8 @@ function renderParts(word, parts){
       ? p.rowsFound.map(x => `<div class="case"><div class="cl">${esc(baseName(x.item))}</div><div class="ccat">→ ${esc(x.cat.split("/")[0].replace(/^※/,"").replace(/。$/,""))}</div>${dayBlock(x.cat.split("/")[0].trim(), true)}</div>`).join("")
         + `<div class="src">根拠：早見表「${esc(p.rowsFound.map(x => x.item).join("」「"))}」</div>`
       : p.rowsFound.length > 1
-      ? p.rowsFound.map(x => candBlock(x, "", word)).join("")
-      : howBlock(r, "cv", word) + `<div class="src">${esc(basis)}<br><a href="${r.src}" target="_blank" rel="noopener">出典：松戸市 家庭ごみの分別早見表「${esc(r.page)}」</a></div>`;
+      ? p.rowsFound.map(x => candBlock(x, "", p.labelName || materialLabelName(x.item))).join("")
+      : howBlock(r, "cv", p.labelName || baseName(r.item)) + `<div class="src">${esc(basis)}<br><a href="${r.src}" target="_blank" rel="noopener">出典：松戸市 家庭ごみの分別早見表「${esc(r.page)}」</a></div>`;
     return `<div class="ch">${nums[i] || (i+1)} ${esc(p.name)}（${p.fromWord ? `「${esc(p.hit)}」の主な部材として` : `名前の「${esc(p.hit)}」から`}）</div>
       <div class="pick" style="margin-top:10px">${esc(p.say)}</div>
       ${body}`;

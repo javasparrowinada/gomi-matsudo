@@ -243,6 +243,14 @@ const mainCat = r => r.cat.split("/")[0].trim();
       if (!h.includes("実物で確かめる順番") || n < 13) failD.push(`名前だけの「${w}」に確かめる順番が出ていない（${n}項目）`);
     } catch (e) { failD.push(`名前だけの「${w}」描画で例外：${e.message}`); }
   }
+  // 貼り紙の品目名に、入力した言葉そのものを入れない（早見表の品目名か決まった呼び方だけ）
+  for (const w of ["車で使う充電台", "スマホの充電台", "木の小物入れ", "ステンレスのラック"]) {
+    try {
+      outEl.innerHTML = ""; await context.render(w); const h = outEl.innerHTML;
+      const names = [...h.matchAll(/class="lc ln"[^>]*>([^<]*)</g)].map(m => m[1]);
+      if (names.some(n => n.includes(w))) failD.push(`貼り紙「${w}」の品目名に入力した言葉が入っている：${[...new Set(names)].join("／")}`);
+    } catch (e) { failD.push(`貼り紙「${w}」描画で例外：${e.message}`); }
+  }
   for (const w of ["スマホの充電台", "補聴器", "ワイパー", "ピーラー", "家電"]) {
     try {
       outEl.innerHTML = "";
