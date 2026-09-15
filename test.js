@@ -180,10 +180,9 @@ const mainCat = r => r.cat.split("/")[0].trim();
     const anyDays = r.cat.split("/").some(c => { const x = app.SCHED[c.trim()] || app.SCHED[c.trim().replace(/。$/, "")]; return x && x.days; });
     if (anyDays && !/class="label"/.test(h)) failD.push(`${where}「${r.item}」貼り紙の枠がない`);
     if (anyDays && !/曜日回収/.test(h)) failD.push(`${where}「${r.item}」貼り紙に回収曜日がない`);
-    for (const t of told) if (/class="label"/.test(h) && !new RegExp(`class="lc (lx|lk|ln)"[^>]*>${escText(t)}`).test(h) && !h.includes(`>${escText(t)}<`)) failD.push(`${where}「${r.item}」貼り紙の枠に指定の文字「${t}」がない`);
-    for (const t of told) if (!h.includes(escText(t)) || !/class="pw"/.test(h)) failD.push(`${where}「${r.item}」貼り紙の文字「${t}」がない`);
-    if (s && s.days && !told.length && !h.includes("指定はありません")) failD.push(`${where}「${r.item}」貼り紙の指定がない旨がない`);
-    if (!told.length && /class="pw"/.test(h) && where === "確定") failD.push(`${where}「${r.item}」指定がないのに貼り紙の文字を出している`);
+    if (anyDays) for (const t of told) if (!new RegExp(`class="lc (lx|lk|ln)"[^>]*>${escText(t)}<`).test(h)) failD.push(`${where}「${r.item}」貼り紙の枠に市が指定する文字「${t}」がない`);
+    if (/class="paper/.test(h)) failD.push(`${where}「${r.item}」貼り紙の説明枠が残っている（不要と指示あり）`);
+    if (!told.length && /class="lc lx"/.test(h)) failD.push(`${where}「${r.item}」指定がないのに貼り紙の枠に白抜きの文字を出している`);
     // 条件で区分が分かれる品目：先頭の区分だけを大きく出して、別の区分の貼り紙を並べる食い違いを防ぐ
     const cats = r.cat.split("/").map(x => x.trim());
     const cs = app.noteCases(note);
@@ -250,7 +249,7 @@ const mainCat = r => r.cat.split("/")[0].trim();
       await context.render(w);
       const h = outEl.innerHTML;
       const n = (h.match(/<div class="ch">[①-⑨]/g) || []).length;
-      if (!h.includes("部材から考えました") || !n || !/class="week"/.test(h) || !h.includes("実物で確かめる順番")) failD.push(`部材「${w}」が部材からの推定として出ていない`);
+      if (!h.includes("部材から考えました") || !n || !/class="week"/.test(h) || h.includes("実物で確かめる順番")) failD.push(`部材「${w}」が部材からの推定として出ていない`);
     } catch (e) { failD.push(`部材「${w}」描画で例外：${e.message}`); }
   }
   installSpies();

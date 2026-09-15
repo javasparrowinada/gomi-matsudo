@@ -2121,8 +2121,7 @@ function howBlock(r, bigClass, name){
     return `<div class="${bigClass}">${esc(main.replace(/^※/,""))}</div>
       ${cats.length > 1 ? `<div class="caution">区分の表記：${esc(r.cat)}（条件で変わります。下の備考を確認してください）</div>` : ""}
       ${dayBlock(main)}
-      ${labelCard(cats.map(c => catName(c) || c).find(c => SCHED[c] && SCHED[c].days) || main, itemName, signsIn(r.note))}
-      ${paperBlock(r)}`;
+      ${labelCard(cats.map(c => catName(c) || c).find(c => SCHED[c] && SCHED[c].days) || main, itemName, signsIn(r.note))}`;
   }
   // 早見表の分別区分のうち、備考のどの場合にも出てこない区分は「上に当てはまらない場合」として最後に置く（区分を落とさない）
   const sameCat = (a, b) => a === b || a.startsWith(b) || b.startsWith(a);   // 「資源ごみ」と「資源ごみ(紙類・布類)」は同じ
@@ -2137,7 +2136,6 @@ function howBlock(r, bigClass, name){
       <div class="ccat">→ ${esc(c.cat.replace(/^※/,""))}</div>
       ${dayBlock(c.cat, true)}
       ${labelCard(c.cat, itemName, generalSigns.concat(c.signs))}
-      ${c.signs.length ? `<div class="paper"><div class="ph">袋に貼る紙に書く文字（松戸市の指定）</div><div class="pw">${c.signs.map(esc).join("<br>")}</div><div class="pn">市の記載：${esc(c.said)}</div></div>` : ""}
     </div>`;
   const bat = cs.filter(c => c.battery), plain = cs.filter(c => !c.battery);
   let body = "";
@@ -2148,16 +2146,10 @@ function howBlock(r, bigClass, name){
   } else {
     body += `<div class="ch">当てはまる場合を見てください</div>` + plain.map(caseHtml).join("");
   }
-  const anySign = cs.some(c => c.signs.length);
-  const general = paperBlock(r, true);
-  const s = SCHED[main] || SCHED[main.replace(/。$/,"")] || null;
-  const none = !anySign && !general && s && s.days
-    ? `<div class="paper none"><div class="ph">袋に貼る紙</div><div class="pn">早見表には、この品目で紙に書く文字の指定はありません。区分と曜日を守って集積所に出します。</div></div>` : "";
   const names = [...new Set(cs.map(c => c.cat.replace(/^※/,"")))];
   return `<div class="${bigClass}">条件で分かれます</div>
     <div class="caution">${esc(names.join("・"))}</div>
-    ${body}
-    ${general}${none}`;
+    ${body}`;
 }
 /* 候補1件分を、区分・曜日・貼り紙・根拠まで全部出す */
 function candBlock(r, why, name){
@@ -2405,7 +2397,8 @@ function looksLikeName(word){
    区分はすべて各項目の早見表の行から出す。大きさは早見表の備考の書き方を数えて示す */
 function checklistHtml(word, parts){
   const hit = new Set(parts.map(p => p.id));
-  const items = PARTS.filter(p => !p.noCheck).map(p => ({p, rows: p.rows.map(n => DATA.find(r => r.item === n)).filter(Boolean)})).filter(x => x.rows.length);
+  const onlyMaterial = parts.length > 0;   // 素材だけ見立てたとき：素材の一覧は出さず、先に確かめる項目だけ出す
+  const items = PARTS.filter(p => !p.noCheck && !(onlyMaterial && p.material)).map(p => ({p, rows: p.rows.map(n => DATA.find(r => r.item === n)).filter(Boolean)})).filter(x => x.rows.length);
   let big = 0, bigSodai = 0;
   DATA.forEach(r => noteCases(r.note).forEach(c => { if(/50センチ以上/.test(c.label)){ big++; if(c.cat === "粗大ごみ") bigSodai++; } }));
   const row = (ask, cats, say, basis, mark, signs) => {
@@ -2414,7 +2407,7 @@ function checklistHtml(word, parts){
       <div class="cl">${mark ? "★ " : ""}${esc(ask)}${mark ? "（名前から当てはまりそう）" : ""}</div>
       <div class="ccat">→ ${esc(cats.map(c => c.replace(/^※/,"")).join("・"))}</div>
       <div class="caution">${esc(say)}</div>
-      ${first ? dayBlock(first, true) + labelCard(first, word, signs) : (SCHED[cats[0]] ? dayBlock(cats[0], true) : "")}
+      ${first ? dayBlock(first, true) : (SCHED[cats[0]] ? dayBlock(cats[0], true) : "")}
       <div class="src">${esc(basis)}</div>
     </div>`;
   };
@@ -2427,7 +2420,11 @@ function checklistHtml(word, parts){
         `根拠：早見表の備考で「50センチメートル以上は」と書かれた${big}件のうち${bigSodai}件が粗大ごみ`, false, []));
     }
   });
-  return `<div class="ch">実物で確かめる順番（どんな物にも使えます）</div>
+  return onlyMaterial
+    ? `<div class="ch">素材より先に確かめること</div>
+    <div class="pick" style="margin-top:10px">次のどれかに当てはまれば、素材ではなくその出し方に従います。</div>
+    ${html.join("")}`
+    : `<div class="ch">実物で確かめる順番（どんな物にも使えます）</div>
     <div class="pick" style="margin-top:10px">上から順に実物を見て、<b>最初に当てはまった項目</b>の出し方に従います。</div>
     ${html.join("")}`;
 }
@@ -2438,7 +2435,7 @@ function renderParts(word, parts){
     const same = p.sameNote ? DATA.filter(x => x.note === r.note).map(x => x.item) : [];
     const basis = `根拠：早見表「${p.rowsFound.map(x => x.item).join("」「")}」${same.length > 1 ? `（備考が同じ書き方の品目：${same.slice(0, 6).join("、")}${same.length > 6 ? ` ほか${same.length - 6}品目` : ""}）` : ""}`;
     const body = p.list
-      ? p.rowsFound.map(x => `<div class="case"><div class="cl">${esc(baseName(x.item))}</div><div class="ccat">→ ${esc(x.cat.split("/")[0].replace(/^※/,""))}</div>${dayBlock(x.cat.split("/")[0].trim(), true)}</div>`).join("")
+      ? p.rowsFound.map(x => `<div class="case"><div class="cl">${esc(baseName(x.item))}</div><div class="ccat">→ ${esc(x.cat.split("/")[0].replace(/^※/,"").replace(/。$/,""))}</div>${dayBlock(x.cat.split("/")[0].trim(), true)}</div>`).join("")
         + `<div class="src">根拠：早見表「${esc(p.rowsFound.map(x => x.item).join("」「"))}」</div>`
       : p.rowsFound.length > 1
       ? p.rowsFound.map(x => candBlock(x, "", word)).join("")
@@ -2454,7 +2451,7 @@ function renderParts(word, parts){
     ${parts.length
       ? `<div class="pick" style="margin-top:10px">名前に含まれる言葉から、中に入っていそうな部材を見立てました。区分は、早見表で同じ部材の品物がどう扱われているかから出しています。<b>番号の小さいものほど優先</b>します${hasHard ? "（電池や刃などがあれば、素材よりそちらの出し方に従います）" : ""}。実物を見て、当てはまらない項目は飛ばしてください。</div>${blocks}`
       : `<div class="pick" style="margin-top:10px">名前からは部材を見立てられませんでした。下の順番で実物を確かめてください。</div>`}
-    ${checklistHtml(word, parts)}
+    ${parts.some(p => !p.material) ? "" : checklistHtml(word, parts)}
     <div class="card quiet" style="margin-top:22px">
       <div class="caution">名前からの見立てなので、実物と違うことがあります。迷ったら松戸市家庭ごみ相談コールセンターで確認してください。</div>
       <div class="tel"><a href="tel:0120264057">0120-264-057</a></div>
