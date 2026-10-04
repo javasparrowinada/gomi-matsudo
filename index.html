@@ -1911,6 +1911,7 @@ function renderCategory(word, cats){
       return `<div class="cand">
         <div class="cv">${esc(c)}</div>
         ${dayBlock(c)}
+        ${catConditionHtml(c)}
         ${labelCard(c, "", [])}
         <div class="caution" style="margin-top:12px">早見表でこの区分になっている品目（${names.length}種類）の例：${esc(names.slice(0, 20).join("、"))}${names.length > 20 ? " ほか" : ""}</div>
       </div>`;
@@ -1945,6 +1946,13 @@ function dayIndexFor(word){
 function catKey(c){
   return norm(c).replace(/^※/,"").replace(/。$/,"").replace(/[()（）]/g,"").replace(/の/g,"").replace(/(回収|収集)$/,"");
 }
+/* 「※不燃ごみ・資源ごみの日に回収」のような区分名は、何のことか分かるように中身を添える */
+function catTitle(c){
+  const name = c.replace(/^※/,"").replace(/。$/,"");
+  const rows = DATA.filter(r => catKey(r.cat.split("/")[0].trim()) === catKey(c));
+  if(/の日に(回収|収集)/.test(name) && rows.length) return `${name}（${rows.map(r => baseName(r.item)).slice(0, 4).join("・")}）`;
+  return name;
+}
 function catsOfDay(d){
   const byKey = {};
   DATA.forEach(r => r.cat.split("/").map(x => x.trim()).forEach(c => {
@@ -1962,6 +1970,34 @@ function itemCond(item){
   if(!m) return "";
   return m.map(x => x.replace(/^[(（]|[)）]$/g, "")).join("・").replace(/センチメートル/g, "センチ").replace(/メートル/g, "m");
 }
+/* その区分の品目に、早見表がどんな条件（素材・寸法）を付けているかを数え上げる。
+   「プラならなんでも」ではないことを、データの件数で示す */
+function catConditions(c){
+  const rows = DATA.filter(r => catKey(r.cat.split("/")[0].trim()) === catKey(c));
+  const cnt = {};
+  rows.forEach(r => itemCond(r.item).split("・").map(x => x.trim()).filter(Boolean).forEach(x => { cnt[x] = (cnt[x] || 0) + 1; }));
+  const top = Object.entries(cnt).filter(([k, v]) => v >= Math.max(3, rows.length * 0.05) && k.length <= 24).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  // その寸法を超えると何になるかは、同じ名前の品目が別の区分に載っているかで調べる
+  const over = {};
+  rows.forEach(r => {
+    const b = baseName(r.item);
+    DATA.filter(x => baseName(x.item) === b && catKey(x.cat.split("/")[0].trim()) !== catKey(c)).forEach(x => {
+      const cond = itemCond(x.item).split("・").find(y => /以上/.test(y));
+      if(cond){ const k = `${cond}は${x.cat.split("/")[0].trim().replace(/^※/,"")}`; over[k] = (over[k] || 0) + 1; }
+    });
+  });
+  const overTop = Object.entries(over).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  return {rows: rows.length, top, overTop};
+}
+function catConditionHtml(c){
+  const x = catConditions(c);
+  if(!x.top.length && !x.overTop.length) return "";
+  return `<div class="caution" style="margin-top:8px">
+    ${x.top.length ? `この区分でよくある条件（早見表 ${x.rows}品目の数え上げ）：${x.top.map(([k, v]) => `<b>${esc(k)}</b>（${v}件）`).join("、")}<br>` : ""}
+    ${x.overTop.length ? `大きさを超えると区分が変わります：${x.overTop.map(([k, v]) => `<b>${esc(k)}</b>（${v}件）`).join("、")}<br>` : ""}
+    条件は品目ごとに違います。品名で調べると、その品物の条件が出ます。
+  </div>`;
+}
 /* ある品目から連想されるもの：同じ区分で、名前や早見表の並びが近い品目 */
 function relatedRows(row, exclude, n){
   const main = row.cat.split("/")[0].trim();
@@ -1972,6 +2008,16 @@ function relatedRows(row, exclude, n){
     .filter(x => x.sc >= 0.34)   // 名前が実際に重なるものだけ（「輪ゴム」→「消しゴム」など）
     .sort((a,b) => b.sc - a.sc)
     .slice(0, n).map(x => x.r);
+}
+/* 住民がいちばん知りたいのは「いつまでに出すか」。今日が収集日でも朝8時30分を過ぎていれば間に合わない */
+function deadlineHtml(d){
+  const now = new Date();
+  const today = now.getDay() === d;
+  const late = today && (now.getHours() > 8 || (now.getHours() === 8 && now.getMinutes() >= 30));
+  if(!today) return `<div class="assume">集積所に出せるのは当日の朝8時30分までです。前の晩には出さないでください。</div>`;
+  return late
+    ? `<div class="assume"><b>今日の朝8時30分は過ぎています。</b>今から出しても回収されません。下の「次は」の日付に出してください。</div>`
+    : `<div class="assume"><b>今日です。朝8時30分までに集積所へ。</b>間に合わない場合は下の「その次」の日付に出してください。</div>`;
 }
 function renderDay(word, d){
   const cats = catsOfDay(d);
@@ -2011,23 +2057,25 @@ function renderDay(word, d){
   out.innerHTML = `<div class="card">
     <div class="pick">「${esc(word)}」として、${WD[d]}曜日に出せるものをまとめました。品物の名前で調べ直すと、大きさや電池などの条件まで分かります。</div>
     <div class="verdict">${WD[d]}曜日に出せるのは</div>
-    <div class="caution">${esc(cats.map(c => c.replace(/^※/,"")).join("・"))}</div>
-    ${cats.map(c => dayBlock(c, true)).join("")}
+    <div class="caution">${esc(cats.map(c => catTitle(c)).join("　／　"))}</div>
+    ${deadlineHtml(d)}
+    ${cats.map(c => `<div class="case"><div class="cl">${esc(catTitle(c))}</div>${dayBlock(c, true)}${catConditionHtml(c)}</div>`).join("")}
     <div class="ch">これまでこのアプリで調べたもの</div>
     ${hist.length
       ? `<div class="pick" style="margin-top:10px">この端末で調べたもののうち、${WD[d]}曜日に出せるものです。</div>${histHtml}`
       : `<div class="pick" style="margin-top:10px">まだ記録がありません。品物の名前を調べると、ここに出るようになります（記録はこの端末の中だけに残ります）。</div>`}
     ${rel.length ? `<div class="ch">そこから連想されるもの</div>
       <div class="pick" style="margin-top:10px">調べたものと同じ区分で、早見表で近くに並んでいる品目です。家の中にありませんか。</div>
-      ${rel.slice(0, 15).map(x => `<div class="case"><div class="cl">${esc(baseName(x.r.item))}${itemCond(x.r.item) ? `（${esc(itemCond(x.r.item))}）` : ""}<br><span class="caution">「${esc(x.from)}」から</span></div><div class="ccat">→ ${esc(x.r.cat.split("/")[0].trim().replace(/^※/,""))}</div></div>`).join("")}` : ""}
+      ${rel.slice(0, 15).map(x => `<div class="case"><div class="cl">${esc(baseName(x.r.item))}${itemCond(x.r.item) ? `（${esc(itemCond(x.r.item))}）` : ""}<br><span class="caution">「${esc(x.from)}」から</span></div><div class="ccat">→ ${esc(x.r.cat.split("/")[0].trim().replace(/^※/,""))}</div><button class="opt" data-w="${esc(baseName(x.r.item))}"><span class="oc">この品物を調べる</span></button></div>`).join("")}` : ""}
     <div class="ch">${WD[d]}曜日に出せるものの例</div>
     ${cats.map(c => {
       const list = examples.filter(x => x.cat === c);
       return list.length ? `<div class="case"><div class="cl">${esc(c.replace(/^※/,""))}</div>
-        ${list.map(x => `<div class="caution">${esc(x.name)}${x.cond ? `<b>（${esc(x.cond)}）</b>` : ""}</div>`).join("")}</div>` : "";
+        ${list.map(x => `<button class="opt" data-w="${esc(x.name)}"><span class="oc">${esc(x.name)}${x.cond ? `（${esc(x.cond)}）` : ""}</span><span class="ow">→ この品物を調べる</span></button>`).join("")}</div>` : "";
     }).join("")}
-    <div class="caution" style="margin-top:16px">${nd.map(x => `${esc(x.c.replace(/^※/,""))}の次の収集日：${fmtDate(x.nd)}`).join("<br>")}</div>
+    <div class="caution" style="margin-top:16px">${nd.map(x => `${esc(catTitle(x.c))}の次の収集日：${fmtDate(x.nd)}`).join("<br>")}</div>
   </div>`;
+  out.querySelectorAll('.opt').forEach(b => { b.onclick = () => { document.getElementById('q').value = b.dataset.w; render(b.dataset.w); window.scrollTo(0, 0); }; });
 }
 function render(word){
   // 「月曜日に捨てるのある？」のような聞き方

@@ -249,6 +249,8 @@ const mainCat = r => r.cat.split("/")[0].trim();
       if (!h.includes("これまでこのアプリで調べたもの") || !h.includes(want)) failD.push(`曜日「${w}」にこれまで調べたものが出ていない`);
       if (!h.includes("そこから連想されるもの")) failD.push(`曜日「${w}」に連想されるものが出ていない`);
       if (!/に出せるものの例/.test(h) || !/class="week"/.test(h)) failD.push(`曜日「${w}」に出せるものの例か曜日の帯がない`);
+      if (!h.includes("8時30分")) failD.push(`曜日「${w}」に朝8時30分の締め切りが出ていない`);
+      if (!/data-w=/.test(h)) failD.push(`曜日「${w}」の例から品物を調べられない`);
       const cats = [...h.matchAll(/<div class="dow">/g)].length;
       if (cats > 6) failD.push(`曜日「${w}」の区分が重複して並んでいる（${cats}件）`);
     } catch (e) { failD.push(`曜日「${w}」描画で例外：${e.message}`); }
