@@ -147,7 +147,7 @@ a{color:var(--ink)}
     <button id="cam">写真から調べる</button>
     <input type="file" id="file" accept="image/*">
   </div>
-  <div class="note">写真は品目名を読み取るためだけに使います。判定そのものは松戸市の早見表の記載だけで行います。</div>
+  <div class="note">写真は品目名を読み取るためだけに使います。判定そのものは松戸市の早見表の記載だけで行います。<br>「月曜日」「明日」と入れると、その日に出せるものと、これまで調べたものから連想した例を出します。</div>
 </div>
 
 <div id="out"></div>
@@ -1917,7 +1917,110 @@ function renderCategory(word, cats){
     }).join("")}
   </div>`;
 }
+/* ========== 調べたものの記録と、曜日からの逆引き ==========
+   記録はこの端末のブラウザの中（localStorage）だけ。どこにも送らない。 */
+const HIST_KEY = "gomi-history-v1";
+function histLoad(){
+  try{ const v = JSON.parse(localStorage.getItem(HIST_KEY)); return Array.isArray(v) ? v : []; }catch(_){ return []; }
+}
+function histAdd(word, item, cat){
+  if(!word || !cat) return;
+  try{
+    const list = histLoad().filter(x => x.word !== word);
+    list.unshift({word, item, cat, at: Date.now()});
+    localStorage.setItem(HIST_KEY, JSON.stringify(list.slice(0, 100)));
+  }catch(_){}
+}
+/* 「月曜日に捨てるのある？」「明日は何出せる？」のような聞き方から曜日を取り出す */
+function dayIndexFor(word){
+  const m = (word||"").match(/([日月火水木金土])曜/);
+  if(m) return WD.indexOf(m[1]);
+  const t = new Date();
+  if(/今日/.test(word||"")) return t.getDay();
+  if(/明日/.test(word||"")){ t.setDate(t.getDate()+1); return t.getDay(); }
+  if(/明後日|あさって/.test(word||"")){ t.setDate(t.getDate()+2); return t.getDay(); }
+  return -1;
+}
+/* 早見表の表記ゆれ（全角半角の括弧、「〜の日に回収／収集」、「その他のプラスチックなどごみ」の誤記）を同じ区分としてまとめる鍵 */
+function catKey(c){
+  return norm(c).replace(/^※/,"").replace(/。$/,"").replace(/[()（）]/g,"").replace(/の/g,"").replace(/(回収|収集)$/,"");
+}
+function catsOfDay(d){
+  const byKey = {};
+  DATA.forEach(r => r.cat.split("/").map(x => x.trim()).forEach(c => {
+    const s = SCHED[c] || SCHED[c.replace(/。$/,"")];
+    if(!(s && s.days && s.days.includes(d))) return;
+    const k = catKey(c);
+    (byKey[k] = byKey[k] || {}); byKey[k][c] = (byKey[k][c] || 0) + 1;
+  }));
+  // 同じ区分の中で、早見表でいちばん多い表記を代表にする
+  return Object.values(byKey).map(v => Object.entries(v).sort((a,b) => b[1] - a[1])[0][0]);
+}
+/* ある品目から連想されるもの：同じ区分で、名前や早見表の並びが近い品目 */
+function relatedRows(row, exclude, n){
+  const main = row.cat.split("/")[0].trim();
+  const base = norm(baseName(row.item));
+  return DATA
+    .filter(r => r !== row && r.cat.split("/")[0].trim() === main && !exclude.has(baseName(r.item)))
+    .map(r => ({r, sc: Math.max(similarity(base, norm(baseName(r.item))), similarity(norm(baseName(r.item)), base))}))
+    .filter(x => x.sc >= 0.34)   // 名前が実際に重なるものだけ（「輪ゴム」→「消しゴム」など）
+    .sort((a,b) => b.sc - a.sc)
+    .slice(0, n).map(x => x.r);
+}
+function renderDay(word, d){
+  const cats = catsOfDay(d);
+  const keys = cats.map(catKey);
+  const inDay = cat => cat.split("/").map(x => x.trim()).some(c => keys.includes(catKey(c)));
+  const hist = histLoad().filter(h => inDay(h.cat));
+  const seen = new Set();
+  const histHtml = hist.slice(0, 15).map(h => {
+    const row = DATA.find(r => r.item === h.item);
+    if(row) seen.add(baseName(row.item));
+    const c = h.cat.split("/").map(x => x.trim()).find(x => keys.includes(catKey(x))) || h.cat;
+    return `<div class="case"><div class="cl">${esc(h.word)}${row && baseName(row.item) !== h.word ? `（早見表の「${esc(baseName(row.item))}」）` : ""}</div><div class="ccat">→ ${esc(c.replace(/^※/,""))}</div></div>`;
+  }).join("");
+  // 連想：調べたものから広げる。まだ何も調べていなければ、その曜日の品目から広く拾う
+  let rel = [];
+  if(hist.length){
+    hist.slice(0, 8).forEach(h => {
+      const row = DATA.find(r => r.item === h.item);
+      if(row) relatedRows(row, seen, 3).forEach(x => { if(!seen.has(baseName(x.item))){ seen.add(baseName(x.item)); rel.push({r:x, from: h.word}); } });
+    });
+  }
+  const examples = [];
+  cats.forEach(c => {
+    const rows = DATA.filter(r => catKey(r.cat.split("/")[0].trim()) === catKey(c));
+    const step = Math.max(1, Math.floor(rows.length / 12));
+    for(let i = 0; i < rows.length && examples.filter(x => x.cat === c).length < 12; i += step){
+      const b = baseName(rows[i].item);
+      if(!seen.has(b)){ seen.add(b); examples.push({cat: c, name: b}); }
+    }
+  });
+  const nd = cats.map(c => ({c, nd: nextDates(SCHED[c] || SCHED[c.replace(/。$/,"")], 1)[0]})).filter(x => x.nd);
+  out.innerHTML = `<div class="card">
+    <div class="pick">「${esc(word)}」として、${WD[d]}曜日に出せるものをまとめました。品物の名前で調べ直すと、大きさや電池などの条件まで分かります。</div>
+    <div class="verdict">${WD[d]}曜日に出せるのは</div>
+    <div class="caution">${esc(cats.map(c => c.replace(/^※/,"")).join("・"))}</div>
+    ${cats.map(c => dayBlock(c, true)).join("")}
+    <div class="ch">これまでこのアプリで調べたもの</div>
+    ${hist.length
+      ? `<div class="pick" style="margin-top:10px">この端末で調べたもののうち、${WD[d]}曜日に出せるものです。</div>${histHtml}`
+      : `<div class="pick" style="margin-top:10px">まだ記録がありません。品物の名前を調べると、ここに出るようになります（記録はこの端末の中だけに残ります）。</div>`}
+    ${rel.length ? `<div class="ch">そこから連想されるもの</div>
+      <div class="pick" style="margin-top:10px">調べたものと同じ区分で、早見表で近くに並んでいる品目です。家の中にありませんか。</div>
+      ${rel.slice(0, 15).map(x => `<div class="case"><div class="cl">${esc(baseName(x.r.item))}<br><span class="caution">「${esc(x.from)}」から</span></div><div class="ccat">→ ${esc(x.r.cat.split("/")[0].trim().replace(/^※/,""))}</div></div>`).join("")}` : ""}
+    <div class="ch">${WD[d]}曜日に出せるものの例</div>
+    ${cats.map(c => {
+      const names = examples.filter(x => x.cat === c).map(x => x.name);
+      return names.length ? `<div class="case"><div class="cl">${esc(c.replace(/^※/,""))}</div><div class="caution">${esc(names.join("、"))}</div></div>` : "";
+    }).join("")}
+    <div class="caution" style="margin-top:16px">${nd.map(x => `${esc(x.c.replace(/^※/,""))}の次の収集日：${fmtDate(x.nd)}`).join("<br>")}</div>
+  </div>`;
+}
 function render(word){
+  // 「月曜日に捨てるのある？」のような聞き方
+  const d = dayIndexFor(word);
+  if(d >= 0 && !searchExact(word).length){ renderDay(word, d); return; }
   // 区分名そのものが入力された
   const catWords = categoryFor(word);
   if(catWords){ renderCategory(word, catWords); return; }
@@ -2210,6 +2313,7 @@ function escBlock(escs, always){
 
 function renderChoices(word, hits){
   const list = sortMetalFirst(hits, x=>x.item);
+  histAdd(word, list[0].item, hits.map(h => h.cat).join("/"));
   const escs = escalatorsFor(word, hits.map(h=>h.note).join(" "));
   out.innerHTML = `<div class="card">
     <div class="pick">「${esc(word)}」は、実物の素材と大きさで出す日が変わります。下に全部並べました。実物に当てはまるものを見てください。</div>
@@ -2307,6 +2411,7 @@ function offlineGuess(word){
 
 function renderGuessChoices(word, rows, splitCats, assumption, metal, escs){
   const list = sortMetalFirst(rows, x=>x.r.item);
+  histAdd(word, list[0].r.item, rows.map(x => x.r.cat).join("/"));
   const head = splitCats
     ? `「${esc(word)}」は早見表に同じ名前がなく、<b>候補によって区分が変わります</b>。ここでは1つに決めません。下に全部並べました。実物に当てはまるものを見てください。`
     : `「${esc(word)}」は早見表に同じ名前がありません。近い品目から探しました。下に全部並べました。実物に当てはまるものを見てください。`;
@@ -2484,6 +2589,7 @@ function renderUnknown(word){
 }
 
 function renderVerdict(r, g){
+  histAdd(g && g.word ? g.word : baseName(r.item), r.item, r.cat);
   const cats = r.cat.split("/").map(s=>s.trim());
   const main = cats[0];
 

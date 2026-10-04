@@ -52,6 +52,8 @@ const context = {
   // API は使えない前提（GitHub Pages 上でも鍵なしで呼ぶため失敗する）→ offlineGuess 側を検証する
   fetch: () => Promise.reject(new Error("offline")),
   URL: { createObjectURL: () => "" },
+  // 調べたものの記録は端末の中だけ。テストでは中身を差し替えられるようにする
+  localStorage: (() => { const m = {}; return { getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); }, removeItem: k => { delete m[k]; }, _m: m }; })(),
   setTimeout, clearTimeout
 };
 vm.createContext(context);
@@ -75,7 +77,8 @@ const orig = {
   renderUnknown: context.renderUnknown,
   renderMulti: context.renderMulti,
   renderParts: context.renderParts,
-  renderCategory: context.renderCategory
+  renderCategory: context.renderCategory,
+  renderDay: context.renderDay
 };
 function installSpies() {
 context.renderVerdict = (r) => { captured = { type: "verdict", rows: [r] }; };
@@ -89,10 +92,11 @@ context.renderUnknown = () => { captured = { type: "unknown", rows: [] }; };
 context.renderMulti = () => { captured = { type: "multi", rows: [] }; };
 context.renderParts = (word, parts) => { captured = { type: "parts", rows: parts.flatMap(p => p.rowsFound) }; };
 context.renderCategory = (word, cats) => { captured = { type: "category", rows: cats.map(c => ({ item: c, cat: c, note: "" })) }; };
+context.renderDay = (word, d) => { captured = { type: "day", rows: [] }; };
 context.guess = (word) => { pending = orig.guess(word); return pending; };
 }
 function removeSpies() {
-  for (const k of ["renderVerdict", "renderChoices", "renderGuessChoices", "renderUnknown", "renderMulti", "renderParts", "renderCategory", "guess"]) context[k] = orig[k];
+  for (const k of ["renderVerdict", "renderChoices", "renderGuessChoices", "renderUnknown", "renderMulti", "renderParts", "renderCategory", "renderDay", "guess"]) context[k] = orig[k];
 }
 installSpies();
 
@@ -234,6 +238,22 @@ const mainCat = r => r.cat.split("/")[0].trim();
   // 部材から推定：根拠にする早見表の行が実在するか、見立てた部材がすべて表示されるか
   for (const p of app.PARTS) for (const n of p.rows) if (!app.DATA.find(r => r.item === n)) failD.push(`部材「${p.name}」の根拠の行「${n}」が早見表にない`);
   for (const [k, ids] of Object.entries(app.PART_WORDS)) for (const id of ids) if (!app.PARTS.find(p => p.id === id)) failD.push(`部材の見立て「${k}」の部材「${id}」が定義にない`);
+  // 曜日からの逆引き：これまで調べたもの → 連想されるもの → その曜日の例
+  context.localStorage.setItem("gomi-history-v1", JSON.stringify([
+    { word: "輪ゴム", item: "輪ゴム", cat: "その他のプラスチックなどのごみ" },
+    { word: "乾電池", item: "乾電池", cat: "有害ごみ" }
+  ]));
+  for (const [w, want] of [["月曜日に捨てるのある？", "輪ゴム"], ["水曜日", "乾電池"]]) {
+    try {
+      outEl.innerHTML = ""; await context.render(w); const h = outEl.innerHTML;
+      if (!h.includes("これまでこのアプリで調べたもの") || !h.includes(want)) failD.push(`曜日「${w}」にこれまで調べたものが出ていない`);
+      if (!h.includes("そこから連想されるもの")) failD.push(`曜日「${w}」に連想されるものが出ていない`);
+      if (!/に出せるものの例/.test(h) || !/class="week"/.test(h)) failD.push(`曜日「${w}」に出せるものの例か曜日の帯がない`);
+      const cats = [...h.matchAll(/<div class="dow">/g)].length;
+      if (cats > 6) failD.push(`曜日「${w}」の区分が重複して並んでいる（${cats}件）`);
+    } catch (e) { failD.push(`曜日「${w}」描画で例外：${e.message}`); }
+  }
+  context.localStorage.removeItem("gomi-history-v1");
   for (const w of ["燃えないゴミ", "資源ごみ"]) {
     try {
       outEl.innerHTML = ""; await context.render(w); const h = outEl.innerHTML;
@@ -274,7 +294,7 @@ const mainCat = r => r.cat.split("/")[0].trim();
   }
   installSpies();
   const okD = failD.length === 0;
-  console.log(`(D) 画面表示: 確定 ${nVerdict} 品目・候補 ${nGroup} グループ・複数入力 2 件・部材推定 5 件・区分名 2 件・確かめる順番 2 件` + (okD ? "  OK" : `  NG（${failD.length} 件）`));
+  console.log(`(D) 画面表示: 確定 ${nVerdict} 品目・候補 ${nGroup} グループ・複数入力 2 件・部材推定 5 件・区分名 2 件・確かめる順番 2 件・曜日 2 件` + (okD ? "  OK" : `  NG（${failD.length} 件）`));
   failD.slice(0, 30).forEach(f => console.log(`    NG ${f}`));
   if (!okD) failed++;
 
