@@ -1956,6 +1956,12 @@ function catsOfDay(d){
   // 同じ区分の中で、早見表でいちばん多い表記を代表にする
   return Object.values(byKey).map(v => Object.entries(v).sort((a,b) => b[1] - a[1])[0][0]);
 }
+/* 早見表の品目名の括弧の中（素材・大きさの条件）を、そのまま短くして出す */
+function itemCond(item){
+  const m = item.match(/[(（]([^)）]*)[)）]/g);
+  if(!m) return "";
+  return m.map(x => x.replace(/^[(（]|[)）]$/g, "")).join("・").replace(/センチメートル/g, "センチ").replace(/メートル/g, "m");
+}
 /* ある品目から連想されるもの：同じ区分で、名前や早見表の並びが近い品目 */
 function relatedRows(row, exclude, n){
   const main = row.cat.split("/")[0].trim();
@@ -1990,10 +1996,15 @@ function renderDay(word, d){
   const examples = [];
   cats.forEach(c => {
     const rows = DATA.filter(r => catKey(r.cat.split("/")[0].trim()) === catKey(c));
-    const step = Math.max(1, Math.floor(rows.length / 12));
-    for(let i = 0; i < rows.length && examples.filter(x => x.cat === c).length < 12; i += step){
-      const b = baseName(rows[i].item);
-      if(!seen.has(b)){ seen.add(b); examples.push({cat: c, name: b}); }
+    // ふだん使う呼び名がある物（言い換え辞書に出てくる物）を先に、残りは早見表の並びから広く拾う
+    const common = r => { const b = baseName(r.item); return SYNONYMS[b] || Object.values(SYNONYMS).includes(b); };
+    const picked = rows.filter(common).concat(rows.filter(r => !common(r)));
+    for(const r of picked){
+      if(examples.filter(x => x.cat === c).length >= 8) break;
+      const b = baseName(r.item);
+      if(seen.has(b)) continue;
+      seen.add(b);
+      examples.push({cat: c, name: b, cond: itemCond(r.item)});
     }
   });
   const nd = cats.map(c => ({c, nd: nextDates(SCHED[c] || SCHED[c.replace(/。$/,"")], 1)[0]})).filter(x => x.nd);
@@ -2008,11 +2019,12 @@ function renderDay(word, d){
       : `<div class="pick" style="margin-top:10px">まだ記録がありません。品物の名前を調べると、ここに出るようになります（記録はこの端末の中だけに残ります）。</div>`}
     ${rel.length ? `<div class="ch">そこから連想されるもの</div>
       <div class="pick" style="margin-top:10px">調べたものと同じ区分で、早見表で近くに並んでいる品目です。家の中にありませんか。</div>
-      ${rel.slice(0, 15).map(x => `<div class="case"><div class="cl">${esc(baseName(x.r.item))}<br><span class="caution">「${esc(x.from)}」から</span></div><div class="ccat">→ ${esc(x.r.cat.split("/")[0].trim().replace(/^※/,""))}</div></div>`).join("")}` : ""}
+      ${rel.slice(0, 15).map(x => `<div class="case"><div class="cl">${esc(baseName(x.r.item))}${itemCond(x.r.item) ? `（${esc(itemCond(x.r.item))}）` : ""}<br><span class="caution">「${esc(x.from)}」から</span></div><div class="ccat">→ ${esc(x.r.cat.split("/")[0].trim().replace(/^※/,""))}</div></div>`).join("")}` : ""}
     <div class="ch">${WD[d]}曜日に出せるものの例</div>
     ${cats.map(c => {
-      const names = examples.filter(x => x.cat === c).map(x => x.name);
-      return names.length ? `<div class="case"><div class="cl">${esc(c.replace(/^※/,""))}</div><div class="caution">${esc(names.join("、"))}</div></div>` : "";
+      const list = examples.filter(x => x.cat === c);
+      return list.length ? `<div class="case"><div class="cl">${esc(c.replace(/^※/,""))}</div>
+        ${list.map(x => `<div class="caution">${esc(x.name)}${x.cond ? `<b>（${esc(x.cond)}）</b>` : ""}</div>`).join("")}</div>` : "";
     }).join("")}
     <div class="caution" style="margin-top:16px">${nd.map(x => `${esc(x.c.replace(/^※/,""))}の次の収集日：${fmtDate(x.nd)}`).join("<br>")}</div>
   </div>`;
