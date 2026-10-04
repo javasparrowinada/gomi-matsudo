@@ -188,6 +188,8 @@ const mainCat = r => r.cat.split("/")[0].trim();
     const anyDays = r.cat.split("/").some(c => { const x = app.SCHED[c.trim()] || app.SCHED[c.trim().replace(/。$/, "")]; return x && x.days; });
     if (anyDays && !/class="label"/.test(h)) failD.push(`${where}「${r.item}」貼り紙の枠がない`);
     if (anyDays && !/曜日回収/.test(h)) failD.push(`${where}「${r.item}」貼り紙に回収曜日がない`);
+    // 紛らわしいけれど区分が違うものを出すときは、必ず別の区分の品目を挙げる
+    if (/class="diff"/.test(h) && !/は <b>/.test(h)) failD.push(`${where}「${r.item}」紛らわしいものの区分が出ていない`);
     if (anyDays) for (const t of told) if (!new RegExp(`class="lc (lx|lk|ln)"[^>]*>${escText(t)}<`).test(h)) failD.push(`${where}「${r.item}」貼り紙の枠に市が指定する文字「${t}」がない`);
     if (/class="paper/.test(h)) failD.push(`${where}「${r.item}」貼り紙の説明枠が残っている（不要と指示あり）`);
     if (!told.length && /class="lc lx"/.test(h)) failD.push(`${where}「${r.item}」指定がないのに貼り紙の枠に白抜きの文字を出している`);

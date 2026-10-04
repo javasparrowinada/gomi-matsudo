@@ -111,6 +111,10 @@ a{color:var(--ink)}
 .cand .cc{font-size:15px;color:var(--sub)}
 .cand .cv{font-size:30px;font-weight:600;line-height:1.3;margin-top:2px}
 .multi-h{font-size:22px;font-weight:600;margin-top:30px}
+/* 紛らわしいけれど区分が違うもの */
+.diff{border:1px dashed var(--ink);padding:12px 14px;margin-top:14px}
+.diff .dh{font-size:13px;color:var(--sub);margin-bottom:6px}
+.diff .dn{font-size:15px;line-height:1.7}
 /* 条件で区分が分かれる品目の場合分け */
 .ch{font-size:17px;font-weight:700;margin-top:20px;padding:8px 12px;background:var(--ink);color:var(--paper)}
 .case{border-left:4px solid var(--ink);padding:2px 0 6px 12px;margin-top:14px}
@@ -1989,6 +1993,26 @@ function catConditions(c){
   const overTop = Object.entries(over).sort((a, b) => b[1] - a[1]).slice(0, 3);
   return {rows: rows.length, top, overTop};
 }
+/* その区分の中で、名前が似ているのに別の区分になる品目を数件示す */
+function catConfusableHtml(c){
+  const rows = DATA.filter(r => catKey(r.cat.split("/")[0].trim()) === catKey(c));
+  const common = r => { const b = baseName(r.item); return SYNONYMS[b] || Object.values(SYNONYMS).includes(b); };
+  const picked = [];
+  const seen = new Set();
+  rows.filter(common).concat(rows.filter(r => !common(r))).forEach(r => {
+    if(picked.length >= 4 || seen.has(baseName(r.item))) return;
+    const other = confusablesFor(r, 1);
+    if(!other.length) return;
+    seen.add(baseName(r.item));
+    picked.push({r, o: other[0]});
+  });
+  if(!picked.length) return "";
+  const line = x => `${esc(baseName(x.r.item))}${itemCond(x.r.item) ? `（${esc(itemCond(x.r.item))}）` : ""} は この区分　／　でも ${esc(baseName(x.o.item))}${itemCond(x.o.item) ? `（${esc(itemCond(x.o.item))}）` : ""} は <b>${esc(x.o.cat.split("/")[0].trim().replace(/^※/,""))}</b>`;
+  return `<div class="diff">
+    <div class="dh">紛らわしいけれど、これは違います</div>
+    <div class="dn">${picked.map(line).join("<br>")}</div>
+  </div>`;
+}
 function catConditionHtml(c){
   const x = catConditions(c);
   if(!x.top.length && !x.overTop.length) return "";
@@ -1996,6 +2020,31 @@ function catConditionHtml(c){
     ${x.top.length ? `この区分でよくある条件（早見表 ${x.rows}品目の数え上げ）：${x.top.map(([k, v]) => `<b>${esc(k)}</b>（${v}件）`).join("、")}<br>` : ""}
     ${x.overTop.length ? `大きさを超えると区分が変わります：${x.overTop.map(([k, v]) => `<b>${esc(k)}</b>（${v}件）`).join("、")}<br>` : ""}
     条件は品目ごとに違います。品名で調べると、その品物の条件が出ます。
+  </div>`;
+}
+/* 紛らわしいけれど区分が違うもの：名前が重なる（一方がもう一方を含む、または似ている）のに区分が違う組み合わせ */
+function confusablesFor(row, n){
+  const b = baseName(row.item), nb = norm(b), key = catKey(row.cat.split("/")[0].trim());
+  const out = [];
+  DATA.forEach(r => {
+    if(r === row) return;
+    const rb = baseName(r.item), nrb = norm(rb);
+    if(catKey(r.cat.split("/")[0].trim()) === key) return;
+    const overlap = nb.includes(nrb) || nrb.includes(nb) || Math.max(similarity(nb, nrb), similarity(nrb, nb)) >= 0.6;
+    if(!overlap) return;
+    if(out.some(x => baseName(x.item) === rb && x.cat === r.cat)) return;
+    out.push(r);
+  });
+  return out.slice(0, n || 3);
+}
+function confusableHtml(row){
+  const list = confusablesFor(row, 3);
+  if(!list.length) return "";
+  const line = r => `${esc(baseName(r.item))}${itemCond(r.item) ? `（${esc(itemCond(r.item))}）` : ""} は <b>${esc(r.cat.split("/")[0].trim().replace(/^※/,""))}</b>`;
+  return `<div class="diff">
+    <div class="dh">紛らわしいけれど、これは違います</div>
+    <div class="dn">${esc(baseName(row.item))}${itemCond(row.item) ? `（${esc(itemCond(row.item))}）` : ""} は <b>${esc(row.cat.split("/")[0].trim().replace(/^※/,""))}</b><br>
+    ${list.map(r => "でも " + line(r)).join("<br>")}</div>
   </div>`;
 }
 /* ある品目から連想されるもの：同じ区分で、名前や早見表の並びが近い品目 */
@@ -2059,7 +2108,7 @@ function renderDay(word, d){
     <div class="verdict">${WD[d]}曜日に出せるのは</div>
     <div class="caution">${esc(cats.map(c => catTitle(c)).join("　／　"))}</div>
     ${deadlineHtml(d)}
-    ${cats.map(c => `<div class="case"><div class="cl">${esc(catTitle(c))}</div>${dayBlock(c, true)}${catConditionHtml(c)}</div>`).join("")}
+    ${cats.map(c => `<div class="case"><div class="cl">${esc(catTitle(c))}</div>${dayBlock(c, true)}${catConditionHtml(c)}${catConfusableHtml(c)}</div>`).join("")}
     <div class="ch">これまでこのアプリで調べたもの</div>
     ${hist.length
       ? `<div class="pick" style="margin-top:10px">この端末で調べたもののうち、${WD[d]}曜日に出せるものです。</div>${histHtml}`
@@ -2334,6 +2383,7 @@ function candBlock(r, why, name){
   return `<div class="cand">
     <div class="cc">${esc(cond || r.item)}</div>
     ${howBlock(r, "cv", name)}
+    ${confusableHtml(r)}
     <div class="src">早見表：${esc(r.item)}${r.note ? `<br>備考：${esc(r.note)}` : ""}${why ? `<br>${esc(why)}` : ""}<br><a href="${r.src}" target="_blank" rel="noopener">出典：松戸市 家庭ごみの分別早見表「${esc(r.page)}」</a></div>
   </div>`;
 }
@@ -2668,6 +2718,7 @@ function renderVerdict(r, g){
   <div class="card">
     ${badge}
     ${howBlock(r, "verdict", g && g.key)}
+    ${confusableHtml(r)}
 
     ${guessNote}
     ${escBlock(escalatorsFor(r.item, r.note), !/電池/.test(r.note||""))}
