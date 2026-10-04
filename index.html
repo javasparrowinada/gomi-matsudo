@@ -2108,7 +2108,7 @@ function renderDay(word, d){
     <div class="verdict">${WD[d]}曜日に出せるのは</div>
     <div class="caution">${esc(cats.map(c => catTitle(c)).join("　／　"))}</div>
     ${deadlineHtml(d)}
-    ${cats.map(c => `<div class="case"><div class="cl">${esc(catTitle(c))}</div>${dayBlock(c, true)}${catConditionHtml(c)}${catConfusableHtml(c)}</div>`).join("")}
+    ${cats.map(c => `<div class="case"><div class="cl">${esc(catTitle(c))}</div>${dayBlock(c, true)}${labelCard(c, "", [])}${catConditionHtml(c)}${catConfusableHtml(c)}</div>`).join("")}
     <div class="ch">これまでこのアプリで調べたもの</div>
     ${hist.length
       ? `<div class="pick" style="margin-top:10px">この端末で調べたもののうち、${WD[d]}曜日に出せるものです。</div>${histHtml}`

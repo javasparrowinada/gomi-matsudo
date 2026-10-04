@@ -252,6 +252,7 @@ const mainCat = r => r.cat.split("/")[0].trim();
       if (!h.includes("そこから連想されるもの")) failD.push(`曜日「${w}」に連想されるものが出ていない`);
       if (!/に出せるものの例/.test(h) || !/class="week"/.test(h)) failD.push(`曜日「${w}」に出せるものの例か曜日の帯がない`);
       if (!h.includes("8時30分")) failD.push(`曜日「${w}」に朝8時30分の締め切りが出ていない`);
+      if (!/class="label"/.test(h)) failD.push(`曜日「${w}」に区分だけの貼り紙の枠がない`);
       if (!/data-w=/.test(h)) failD.push(`曜日「${w}」の例から品物を調べられない`);
       const cats = [...h.matchAll(/<div class="dow">/g)].length;
       if (cats > 6) failD.push(`曜日「${w}」の区分が重複して並んでいる（${cats}件）`);
